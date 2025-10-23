@@ -5,8 +5,10 @@ const isDev = process.env.NODE_ENV === 'development'
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 1280,
+    height: 900,
+    title: 'Trendo POS',
+    center: true,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
