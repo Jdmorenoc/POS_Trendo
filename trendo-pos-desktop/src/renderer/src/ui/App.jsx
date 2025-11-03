@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import Login from './Login'
 import Menu from './Menu'
-import Inventory from './Inventory'
-import Cash from './Cash'
+import Inventory from './inventario/Inventory'
+import ControlStock from './inventario/ControlStock'
+import Configuracion from './inventario/Configuracion'
+import Cash from './caja/Cash'
+import Contabilidad from './contabilidad/Contabilidad'
 import { supabase } from '@/lib/supabase'
 
 export default function App() {
@@ -64,7 +67,9 @@ export default function App() {
 
   if (view === 'loading') return null
   if (!user || view === 'login') return <Login onAuthenticated={handleAuthenticated} />
-  if (view === 'inventory') return <Inventory onBack={() => setView('menu')} onLogout={handleLogout} />
+  if (view === 'inventory') return <Inventory onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />
+  if (view === 'controlStock') return <ControlStock onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />
+  if (view === 'configuracion') return <Configuracion onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />
   if (view === 'cash') return <Cash onBack={() => setView('menu')} onLogout={handleLogout} />
   return (
     <Menu
