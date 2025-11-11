@@ -7,6 +7,7 @@ module.exports = {
   theme: {
     extend: {}
   },
-  darkMode: 'media',
+  // Enable class strategy so we can toggle dark via a root class
+  darkMode: 'class',
   plugins: []
 }

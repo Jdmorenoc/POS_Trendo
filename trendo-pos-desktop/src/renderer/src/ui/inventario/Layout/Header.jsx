@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { onConnectivityChange } from '@/lib/sync'
 
 function ArrowLeftIcon({ className = 'w-5 h-5' }) {
@@ -13,20 +13,24 @@ function OnlineBadge() {
   const [online, setOnline] = useState(navigator.onLine)
   useEffect(() => onConnectivityChange(() => setOnline(navigator.onLine)), [])
   return (
-    <span className={`px-2 py-1 rounded text-xs ${online ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+    <span className={`px-2 py-1 rounded text-xs ${online
+      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+      : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>
       {online ? 'Online' : 'Offline'}
     </span>
   )
 }
 
-export default function Header({ onBack, syncAll }) {
+export default function Header({ onBack, syncAll, title = 'Inventario', showBack = true }) {
   return (
     <header className="flex items-center justify-between mb-4">
       <div className="flex items-center gap-3">
-        <button onClick={onBack} title="Volver" className="p-2 rounded hover:bg-gray-100 transition-colors">
-          <ArrowLeftIcon />
-        </button>
-        <h2 className="text-xl font-semibold text-black">Inventario</h2>
+        {showBack && (
+          <button onClick={onBack} title="Volver" className="p-2 rounded bg-black text-white hover:bg-gray-900 transition-colors">
+            <ArrowLeftIcon />
+          </button>
+        )}
+        <h2 className="text-xl font-semibold text-black dark:text-white">{title}</h2>
       </div>
       <div className="flex items-center gap-3">
         <OnlineBadge />

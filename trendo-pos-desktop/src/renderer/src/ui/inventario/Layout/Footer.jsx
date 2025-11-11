@@ -1,25 +1,44 @@
 import React from 'react'
 
-export default function Footer() {
+export default function Footer({ compact = false }) {
   const year = new Date().getFullYear()
 
+  if (compact) {
+    return (
+      <div className="mt-8 border border-gray-200 dark:border-neutral-700 rounded-lg p-4 bg-white dark:bg-neutral-800">
+        <div className="flex flex-wrap items-center gap-6 text-sm text-gray-700 dark:text-gray-300">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-green-500 rounded-full" />
+            <span className="text-gray-600 dark:text-gray-300">Sistema Actualizado</span>
+          </div>
+          <div className="text-gray-600 dark:text-gray-300">Versión 1.0.0</div>
+          <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15V3m0 12l-4-4m4 4l4-4M2 17l.621 2.485A2 2 0 004.561 21h14.878a2 2 0 001.94-1.515L22 17" />
+            </svg>
+            <span>Sincronización Automática</span>
+          </div>
+          <span className="ml-auto text-gray-600 dark:text-gray-300">© {year} Trendo POS</span>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <footer className="fixed bottom-0 left-64 right-0 bg-white border-t border-[#a6a6a6] py-4 px-6">
+    <footer className="fixed bottom-0 left-0 right-0 bg-white dark:bg-neutral-900 border-t border-gray-200 dark:border-neutral-800 py-4 px-6 z-50">
       <div className="flex items-center justify-between max-w-full">
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-            <span className="text-sm text-gray-600">Sistema Actualizado</span>
+            <div className="w-2 h-2 bg-green-500 rounded-full" />
+            <span className="text-sm text-gray-600 dark:text-gray-300">Sistema Actualizado</span>
           </div>
-          <div className="text-sm text-gray-600">
-            Versión 1.0.0
-          </div>
+          <div className="text-sm text-gray-600 dark:text-gray-300">Versión 1.0.0</div>
         </div>
-        <div className="flex items-center gap-6 text-sm text-gray-600">
+        <div className="flex items-center gap-6 text-sm text-gray-600 dark:text-gray-300">
           <span>© {year} Trendo POS</span>
           <div className="flex items-center gap-2">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15V3m0 12l-4-4m4 4l4-4M2 17l.621 2.485A2 2 0 004.561 21h14.878a2 2 0 001.94-1.515L22 17"></path>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15V3m0 12l-4-4m4 4l4-4M2 17l.621 2.485A2 2 0 004.561 21h14.878a2 2 0 001.94-1.515L22 17" />
             </svg>
             <span>Sincronización Automática</span>
           </div>

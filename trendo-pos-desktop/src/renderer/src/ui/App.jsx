@@ -3,7 +3,9 @@ import Login from './Login'
 import Menu from './Menu'
 import Inventory from './inventario/Inventory'
 import ControlStock from './inventario/ControlStock'
-import Configuracion from './inventario/Configuracion'
+import Configuracion from './configuracion/Configuracion'
+import Devoluciones from './inventario/Devoluciones'
+import Reportes from './inventario/Reportes'
 import Cash from './caja/Cash'
 import Contabilidad from './contabilidad/Contabilidad'
 import { supabase } from '@/lib/supabase'
@@ -11,6 +13,29 @@ import { supabase } from '@/lib/supabase'
 export default function App() {
   const [user, setUser] = useState(null)
   const [view, setView] = useState('loading') // 'login' | 'menu' | 'inventory' | 'cash'
+  // Apply saved dark mode preference (class strategy)
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const savedDark = window.localStorage.getItem('pref_dark') === '1'
+        document.documentElement.classList.toggle('dark', savedDark)
+      }
+    } catch {/* ignore */}
+  }, [])
+
+  // Apply saved font size preference globally on startup
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const saved = window.localStorage.getItem('pref_font_scale')
+        const scale = saved ? parseFloat(saved) : 1
+        const pct = isFinite(scale) && scale > 0 ? scale * 100 : 100
+        document.documentElement.style.fontSize = `${pct}%`
+      }
+    } catch {
+      // ignore if localStorage or DOM not available
+    }
+  }, [])
 
   useEffect(() => {
     async function boot() {
@@ -67,14 +92,19 @@ export default function App() {
 
   if (view === 'loading') return null
   if (!user || view === 'login') return <Login onAuthenticated={handleAuthenticated} />
-  if (view === 'inventory') return <Inventory onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />
+  if (view === 'inventory') return <Inventory user={user} onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />
   if (view === 'controlStock') return <ControlStock onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />
-  if (view === 'configuracion') return <Configuracion onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />
+  if (view === 'configuracion') return <Configuracion onBack={() => setView('menu')} />
   if (view === 'cash') return <Cash onBack={() => setView('menu')} onLogout={handleLogout} />
+    if (view === 'devoluciones') return <Devoluciones onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />
+  if (view === 'reportes') return <Reportes onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />
+  if (view === 'contabilidad') return <Contabilidad onBack={() => setView('menu')} onLogout={handleLogout} />
   return (
     <Menu
       onGoInventory={() => setView('inventory')}
       onGoCash={() => setView('cash')}
+      onGoContabilidad={() => setView('contabilidad')}
+      onGoConfiguracion={() => setView('configuracion')}
       onLogout={handleLogout}
     />
   )

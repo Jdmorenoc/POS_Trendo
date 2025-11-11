@@ -44,7 +44,7 @@ function ConnectionBar() {
   const online = useOnline()
   const dateLabel = useNowString()
   return (
-    <div className="mx-auto mt-4 w-[560px] max-w-[92vw] bg-white/95 text-gray-800 rounded-xl shadow border flex items-center justify-between px-5 py-3">
+    <div className="mx-auto mt-4 w-[560px] max-w-[92vw] bg-[#f8fafc] text-gray-800 rounded-xl shadow border flex items-center justify-between px-5 py-3 shadow-md">
       <div className="flex items-center gap-3">
         <WifiIcon className={online ? 'w-4 h-4 text-green-600' : 'w-4 h-4 text-red-600'} />
         <CloudIcon className={online ? 'w-4 h-4 text-green-600' : 'w-4 h-4 text-red-600'} />
@@ -92,9 +92,9 @@ export default function Login({ onAuthenticated }) {
   }
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center">
+  <div className="min-h-screen w-full flex flex-col items-center justify-center text-gray-900 dark:text-gray-100 transition-colors bg-[linear-gradient(140deg,_#fafafa_0%,_#e9eaec_25%,_#c9cbce_50%,_#8e9092_75%,_#2a2b2d_100%)] dark:bg-[linear-gradient(140deg,_#0d0d10_0%,_#17181b_30%,_#232529_55%,_#303338_75%,_#3e4247_100%)]">
       {/* Card */}
-      <div className="w-[560px] max-w-[92vw] bg-gray-100 text-gray-900 rounded-xl shadow-lg border border-gray-200 p-8">
+      <div className="w-[560px] max-w-[92vw] bg-gray-100 dark:bg-neutral-800 text-gray-900 dark:text-gray-100 rounded-xl shadow-lg border border-gray-200 dark:border-neutral-700 p-8">
         <div className="flex justify-center mb-6">
           <div className="w-24 h-12 bg-black rounded-full flex items-center justify-center text-white text-lg font-semibold">
             Trendo
@@ -109,7 +109,7 @@ export default function Login({ onAuthenticated }) {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 rounded border bg-white outline-none focus:ring-2 focus:ring-blue-400"
+              className="w-full px-3 py-2 rounded border bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 outline-none focus:ring-2 focus:ring-blue-400"
               placeholder="cajero@tienda.com"
             />
           </div>
@@ -120,7 +120,7 @@ export default function Login({ onAuthenticated }) {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2 rounded border bg-white outline-none focus:ring-2 focus:ring-blue-400"
+              className="w-full px-3 py-2 rounded border bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 outline-none focus:ring-2 focus:ring-blue-400"
               placeholder="••••••••"
             />
           </div>
@@ -136,7 +136,7 @@ export default function Login({ onAuthenticated }) {
           </button>
         </form>
 
-        <div className="mt-4 text-xs text-gray-600">
+        <div className="mt-4 text-xs text-gray-600 dark:text-gray-400">
           Acceso exclusivo para personal autorizado ·{' '}
           {mode === 'login' ? (
             <button className="text-blue-600 hover:underline" onClick={() => setMode('register')}>Crear cuenta</button>
