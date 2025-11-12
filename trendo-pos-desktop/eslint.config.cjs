@@ -22,6 +22,8 @@ module.exports = [
     },
     rules: {
       'react/react-in-jsx-scope': 'off',
+      // Mark JSX variables as used so no-unused-vars doesn't flag React components/imports
+      'react/jsx-uses-vars': 'warn',
       'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }]
     },
     settings: {

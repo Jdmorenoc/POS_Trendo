@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { syncAll } from '@/lib/sync'
 import Header from '../inventario/Layout/Header'
 import Footer from '../inventario/Layout/Footer'

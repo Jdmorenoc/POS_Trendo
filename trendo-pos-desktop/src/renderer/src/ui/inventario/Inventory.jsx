@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { v4 as uuid } from 'uuid'
-import { listItems, upsertItem, markDeleted, findItemByCode } from '@/lib/db'
+import { listItems, upsertItem, markDeleted, findItemByCode, adjustStockByItem } from '@/lib/db'
+import { formatCOPInput, parseCOP, formatCOP } from '@/lib/currency'
 import { onConnectivityChange, syncAll, watchRealtime } from '@/lib/sync'
 import { liveQuery } from 'dexie'
 import Sidebar from './Layout/Sidebar'
@@ -27,7 +28,7 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
   const [newProduct, setNewProduct] = useState({
     item: '',
     title: '',
-    price: '',
+    price: '', // masked COP string e.g. "12.500"
     xs: '',
     s: '',
     m: '',
@@ -38,7 +39,7 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
   })
   const [showEditForm, setShowEditForm] = useState(false)
   const [editing, setEditing] = useState(null)
-  const [search, setSearch] = useState('')
+  const [search] = useState('')
   const [errorAdd, setErrorAdd] = useState('')
   const [errorEdit, setErrorEdit] = useState('')
   // Modal de búsqueda por ITEM
@@ -47,6 +48,13 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
   const [itemLookupResult, setItemLookupResult] = useState(null)
   const [itemLookupError, setItemLookupError] = useState('')
   const [itemLookupLoading, setItemLookupLoading] = useState(false)
+  // Ajuste global de stock
+  const [showAdjustForm, setShowAdjustForm] = useState(false)
+  const [adjustSearch, setAdjustSearch] = useState('')
+  const [adjustItem, setAdjustItem] = useState('')
+  const [adjustItemData, setAdjustItemData] = useState(null)
+  const [adjustData, setAdjustData] = useState({ size: '', qty: '', reason: '' })
+  const [adjustError, setAdjustError] = useState('')
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -71,6 +79,43 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
     setItemLookupResult(null)
     setItemLookupError('')
     setShowItemLookup(true)
+  }
+
+  function openAdjust() {
+    setShowAdjustForm(true)
+    setAdjustSearch('')
+    setAdjustItem('')
+    setAdjustItemData(null)
+    setAdjustData({ size: '', qty: '', reason: '' })
+    setAdjustError('')
+  }
+
+  useEffect(() => {
+    if (!adjustItem) { setAdjustItemData(null); return }
+    const found = items.find(i => i.item === adjustItem)
+    setAdjustItemData(found || null)
+  }, [adjustItem, items])
+
+  async function submitAdjust(e) {
+    e.preventDefault()
+    setAdjustError('')
+    const code = adjustItem.trim()
+    const { size, qty } = adjustData
+    if (!code) { setAdjustError('Selecciona un ITEM'); return }
+    if (!size) { setAdjustError('Selecciona talla'); return }
+    if (!qty) { setAdjustError('Cantidad requerida'); return }
+    const delta = parseInt(qty, 10)
+    if (isNaN(delta) || delta === 0) { setAdjustError('Cantidad inválida (≠ 0)'); return }
+    if (!['xs','s','m','l','xl'].includes(size)) { setAdjustError('Talla inválida'); return }
+    const current = (adjustItemData && adjustItemData[size]) || 0
+    if (delta < 0 && current + delta < 0) { setAdjustError(`Stock insuficiente en ${size.toUpperCase()} (actual ${current})`); return }
+    try {
+      await adjustStockByItem(code, size, delta)
+      if (navigator.onLine) await syncAll()
+      setShowAdjustForm(false)
+    } catch {
+      setAdjustError('Error al ajustar stock')
+    }
   }
 
   async function performItemLookup(code) {
@@ -121,12 +166,12 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
       id, 
       item: code,
       title: newProduct.title || 'Nuevo item',
-      price: parseFloat(newProduct.price) || 0,
-      xs: parseInt(newProduct.xs) || 0,
-      s: parseInt(newProduct.s) || 0,
-      m: parseInt(newProduct.m) || 0,
-      l: parseInt(newProduct.l) || 0,
-      xl: parseInt(newProduct.xl) || 0,
+  price: parseCOP(newProduct.price),
+  xs: Math.max(0, parseInt(newProduct.xs) || 0),
+  s: Math.max(0, parseInt(newProduct.s) || 0),
+  m: Math.max(0, parseInt(newProduct.m) || 0),
+  l: Math.max(0, parseInt(newProduct.l) || 0),
+  xl: Math.max(0, parseInt(newProduct.xl) || 0),
       gender: newProduct.gender || 'Unisex',
       description: newProduct.description,
       deleted: 0 
@@ -140,7 +185,7 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
     setEditing({
       id: item.id,
       title: item.title || '',
-      price: item.price || 0,
+  price: item.price ? formatCOPInput(item.price) : '',
       xs: item.xs || 0,
       s: item.s || 0,
       m: item.m || 0,
@@ -171,7 +216,10 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
       setErrorEdit('ITEM ya existe, elige otro código')
       return
     }
-  const patch = { ...rest, item: code, gender: rest.gender || 'Unisex' }
+    const sizes = ['xs','s','m','l','xl']
+    const cleaned = { ...rest }
+    sizes.forEach(sz => { cleaned[sz] = Math.max(0, parseInt(rest[sz]) || 0) })
+  const patch = { ...cleaned, item: code, gender: cleaned.gender || 'Unisex', price: parseCOP(cleaned.price) }
     await upsertItem({ id, ...patch })
     if (navigator.onLine) await syncAll()
     setShowEditForm(false)
@@ -203,6 +251,13 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
             >
               Buscar por ITEM
             </button>
+            <button
+              onClick={openAdjust}
+              className="px-3 py-2 text-sm rounded-md border border-blue-500 dark:border-blue-400 bg-blue-600 dark:bg-blue-700 text-white hover:bg-blue-700 dark:hover:bg-blue-600"
+              title="Ajustar stock de un ITEM"
+            >
+              Editar ITEM
+            </button>
 
           </div>
           <div className="flex items-center justify-between">
@@ -221,37 +276,37 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
         </div>
 
         {showAddForm && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center backdrop-blur-sm">
-            <div className="bg-white rounded-lg p-6 w-96 shadow-xl border border-gray-200">
-              <h3 className="text-lg font-semibold mb-4 text-black">Agregar Nuevo Producto</h3>
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center backdrop-blur-sm z-50">
+            <div className="bg-white dark:bg-neutral-800 rounded-lg p-6 w-96 shadow-xl border border-gray-200 dark:border-neutral-700 transition-colors">
+              <h3 className="text-lg font-semibold mb-4 text-black dark:text-white">Agregar Nuevo Producto</h3>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">ITEM</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">ITEM</label>
                   <input
                     type="text"
                     value={newProduct.item}
                     onChange={(e) => setNewProduct({...newProduct, item: e.target.value})}
                     maxLength={MAX_SKU}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-black"
+                    className="mt-1 block w-full rounded-md border border-gray-300 dark:border-neutral-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-neutral-700 text-black dark:text-gray-100"
                     placeholder="Código único (ej. SKU)"
                   />
                   {errorAdd && <div className="mt-1 text-xs text-red-600">{errorAdd}</div>}
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-black">Nombre del Producto</label>
+                  <label className="block text-sm font-medium text-black dark:text-gray-200">Nombre del Producto</label>
                   <input
                     type="text"
                     value={newProduct.title}
                     onChange={(e) => setNewProduct({...newProduct, title: e.target.value})}
-                    className="mt-1 block w-full rounded-md border-[#a6a6a6] shadow-sm focus:border-[#a6a6a6] focus:ring-[#a6a6a6] bg-white text-black"
+                    className="mt-1 block w-full rounded-md border border-[#a6a6a6] dark:border-neutral-600 shadow-sm focus:border-[#a6a6a6] focus:ring-[#a6a6a6] bg-white dark:bg-neutral-700 text-black dark:text-gray-100"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Género</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Género</label>
                   <select
                     value={newProduct.gender}
                     onChange={e => setNewProduct({ ...newProduct, gender: e.target.value })}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-black text-sm"
+                    className="mt-1 block w-full rounded-md border border-gray-300 dark:border-neutral-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-neutral-700 text-black dark:text-gray-100 text-sm"
                   >
                     <option>Unisex</option>
                     <option>Hombre</option>
@@ -259,48 +314,67 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Stock por talla</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Stock por talla</label>
                   <div className="grid grid-cols-5 gap-2">
                     {['xs','s','m','l','xl'].map(size => (
-                      <input key={size}
+                      <input
+                        key={size}
                         type="number"
+                        min="0"
                         value={newProduct[size] || ''}
-                        onChange={e => setNewProduct({ ...newProduct, [size]: e.target.value })}
+                        onChange={e => {
+                          const raw = e.target.value
+                          if (raw === '') {
+                            setNewProduct({ ...newProduct, [size]: '' })
+                            return
+                          }
+                          let n = parseInt(raw, 10)
+                          if (isNaN(n) || n < 0) n = 0
+                          setNewProduct({ ...newProduct, [size]: String(n) })
+                        }}
                         placeholder={size.toUpperCase()}
-                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 px-2 py-1 text-sm bg-white text-black"
+                        className="w-full rounded-md border border-gray-300 dark:border-neutral-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 px-2 py-1 text-sm bg-white dark:bg-neutral-700 text-black dark:text-gray-100"
                       />
                     ))}
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Precio</label>
-                  <input
-                    type="number"
-                    value={newProduct.price}
-                    onChange={(e) => setNewProduct({...newProduct, price: e.target.value})}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-black"
-                  />
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Precio (COP)</label>
+                  <div className="relative">
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-500 dark:text-gray-400">COP</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={newProduct.price}
+                      onChange={(e) => {
+                        const masked = formatCOPInput(e.target.value)
+                        setNewProduct({...newProduct, price: masked })
+                      }}
+                      placeholder="Ej: 120.000"
+                      className="pl-10 mt-1 block w-full rounded-md border border-gray-300 dark:border-neutral-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-neutral-700 text-black dark:text-gray-100"
+                    />
+                  </div>
+                  <p className="mt-1 text-[10px] text-gray-500 dark:text-gray-400">Escriba solo números; se aplican separadores automáticamente.</p>
                 </div>
-                
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Descripción</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Descripción</label>
                   <textarea
                     value={newProduct.description}
                     onChange={(e) => setNewProduct({...newProduct, description: e.target.value})}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-black"
+                    className="mt-1 block w-full rounded-md border border-gray-300 dark:border-neutral-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-neutral-700 text-black dark:text-gray-100"
                     rows="3"
                   ></textarea>
                 </div>
                 <div className="flex justify-end gap-3 mt-6">
                   <button
                     onClick={() => setShowAddForm(false)}
-                    className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                    className="px-4 py-2 text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-neutral-700 rounded-md hover:bg-gray-200 dark:hover:bg-neutral-600"
                   >
                     Cancelar
                   </button>
                   <button
                     onClick={handleSubmit}
-                    className="px-4 py-2 text-white bg-blue-600 rounded-md hover:bg-blue-700"
+                    className="px-4 py-2 text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:ring-2 focus:ring-blue-400 focus:outline-none"
                   >
                     OK
                   </button>
@@ -324,6 +398,8 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
                   <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-20">L</th>
                   <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-20">XL</th>
                   <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-24">Total</th>
+                  <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-28">VALOR</th>
+                  <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-24">IVA (19%)</th>
                   <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-32">Estado</th>
                   <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-32">Acciones</th>
                 </tr>
@@ -343,6 +419,8 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
                       </td>
                     ))}
                     <td className="px-3 py-2 text-gray-700 dark:text-gray-200 font-medium">{i.quantity || 0}</td>
+                    <td className="px-3 py-2 text-gray-700 dark:text-gray-200">{typeof i.price === 'number' ? formatCOP(i.price) : '—'}</td>
+                    <td className="px-3 py-2 text-gray-700 dark:text-gray-200">{typeof i.price === 'number' ? formatCOP(Math.round(i.price * 0.19)) : '—'}</td>
                     <td className="px-3 py-2">
                       {i.dirty ? (
                         <span className="px-2 py-1 rounded text-xs bg-amber-100 text-amber-700">Pendiente</span>
@@ -374,7 +452,7 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-3 py-10 text-center text-gray-500 dark:text-gray-400">Sin productos</td>
+                    <td colSpan={13} className="px-3 py-10 text-center text-gray-500 dark:text-gray-400">Sin productos</td>
                   </tr>
                 )}
               </tbody>
@@ -486,10 +564,21 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Stock por talla</label>
                   <div className="grid grid-cols-5 gap-2">
                     {['xs','s','m','l','xl'].map(size => (
-                      <input key={size}
+                      <input
+                        key={size}
                         type="number"
-                        value={editing[size] || ''}
-                        onChange={e => setEditing({ ...editing, [size]: parseInt(e.target.value||'0') })}
+                        min="0"
+                        value={typeof editing[size] === 'number' ? editing[size] : (parseInt(editing[size]) || 0)}
+                        onChange={e => {
+                          const raw = e.target.value
+                          if (raw === '') {
+                            setEditing({ ...editing, [size]: 0 })
+                            return
+                          }
+                          let n = parseInt(raw, 10)
+                          if (isNaN(n) || n < 0) n = 0
+                          setEditing({ ...editing, [size]: n })
+                        }}
                         placeholder={size.toUpperCase()}
                         className="w-full rounded-md border-gray-300 dark:border-neutral-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 px-2 py-1 text-sm bg-white dark:bg-neutral-700 text-black dark:text-gray-100"
                       />
@@ -497,13 +586,23 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Precio</label>
-                  <input
-                    type="number"
-                    value={editing.price}
-                    onChange={(e) => setEditing({ ...editing, price: parseFloat(e.target.value||'0') })}
-                    className="mt-1 block w-full rounded-md border-gray-300 dark:border-neutral-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-neutral-700 text-black dark:text-gray-100"
-                  />
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Precio (COP)</label>
+                  <div className="relative">
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">COP</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={editing.price}
+                      onChange={(e) => {
+                        const masked = formatCOPInput(e.target.value)
+                        setEditing({ ...editing, price: masked })
+                      }}
+                      onFocus={(e)=> e.target.select()}
+                      placeholder="Ej: 85.000"
+                      className="pl-10 mt-1 block w-full rounded-md border-gray-300 dark:border-neutral-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-neutral-700 text-black dark:text-gray-100"
+                    />
+                  </div>
+                  <p className="mt-1 text-[10px] text-gray-500 dark:text-gray-400">Puede borrar todo el valor y escribir de nuevo. Solo números, se formatea automáticamente.</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Descripción</label>
@@ -530,6 +629,117 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {showAdjustForm && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+            <form
+              onSubmit={submitAdjust}
+              className="bg-white dark:bg-neutral-800 w-full max-w-md rounded-lg border border-gray-200 dark:border-neutral-700 p-6 shadow-xl space-y-4"
+            >
+              <h3 className="text-lg font-semibold text-black dark:text-white">Editar ITEM (Ajustar Stock)</h3>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Buscar producto</label>
+                <input
+                  type="text"
+                  value={adjustSearch}
+                  onChange={e => setAdjustSearch(e.target.value)}
+                  placeholder="Buscar por nombre o ITEM"
+                  className="mt-1 w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-black dark:text-gray-100 text-sm"
+                  autoFocus
+                />
+                <select
+                  value={adjustItem}
+                  onChange={e => setAdjustItem(e.target.value)}
+                  className="mt-2 w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-black dark:text-gray-100 text-sm"
+                >
+                  <option value="">Selecciona…</option>
+                  {items
+                    .filter(it => {
+                      const q = adjustSearch.trim().toLowerCase()
+                      if (!q) return true
+                      return (it.title||'').toLowerCase().includes(q) || (it.item||'').toLowerCase().includes(q)
+                    })
+                    .slice(0, 200)
+                    .map(it => (
+                      <option key={it.id} value={it.item || ''}>
+                        {(it.title || '—')} ({it.item || it.id.slice(0,8)})
+                      </option>
+                    ))}
+                </select>
+              </div>
+              {adjustItemData && (
+                <div className="text-xs text-gray-600 dark:text-gray-300 border rounded p-2 bg-gray-50 dark:bg-neutral-700/40">
+                  <div className="font-semibold text-black dark:text-white mb-1">{adjustItemData.title || '—'}</div>
+                  <div className="flex flex-wrap gap-2">
+                    {['xs','s','m','l','xl'].map(sz => (
+                      <div key={sz} className="px-2 py-1 rounded border border-gray-200 dark:border-neutral-600 text-[10px] flex flex-col items-center">
+                        <span className="uppercase text-gray-500 dark:text-gray-300">{sz}</span>
+                        <span className="font-semibold text-black dark:text-white">{adjustItemData[sz] || 0}</span>
+                      </div>
+                    ))}
+                    <div className="px-2 py-1 rounded border border-gray-200 dark:border-neutral-600 text-[10px] flex flex-col items-center">
+                      <span className="uppercase text-gray-500 dark:text-gray-300">Total</span>
+                      <span className="font-semibold text-black dark:text-white">{adjustItemData.quantity || 0}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-4 mt-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Talla</label>
+                  <select
+                    value={adjustData.size}
+                    onChange={e => setAdjustData(d => ({ ...d, size: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-black dark:text-gray-100 text-sm"
+                  >
+                    <option value="">Selecciona</option>
+                    <option value="xs">XS</option>
+                    <option value="s">S</option>
+                    <option value="m">M</option>
+                    <option value="l">L</option>
+                    <option value="xl">XL</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Cantidad (+ / -)</label>
+                  <input
+                    type="number"
+                    value={adjustData.qty}
+                    onChange={e => setAdjustData(d => ({ ...d, qty: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-black dark:text-gray-100 text-sm"
+                    placeholder="Ej: 5 o -2"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Motivo (opcional)</label>
+                <input
+                  type="text"
+                  value={adjustData.reason}
+                  onChange={e => setAdjustData(d => ({ ...d, reason: e.target.value }))}
+                  className="mt-1 w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-black dark:text-gray-100 text-sm"
+                  placeholder="Ingreso, corrección, merma…"
+                />
+              </div>
+              {adjustError && <div className="text-xs text-red-600">{adjustError}</div>}
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAdjustForm(false)}
+                  className="px-4 py-2 text-sm rounded border border-gray-300 dark:border-neutral-600 hover:bg-gray-50 dark:hover:bg-neutral-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-sm rounded bg-black text-white hover:bg-gray-800 dark:bg-white dark:text-black dark:hover:bg-gray-200"
+                >
+                  Guardar
+                </button>
+              </div>
+            </form>
           </div>
         )}
 

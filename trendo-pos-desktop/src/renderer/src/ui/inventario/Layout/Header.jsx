@@ -34,7 +34,7 @@ export default function Header({ onBack, syncAll, title = 'Inventario', showBack
       </div>
       <div className="flex items-center gap-3">
         <OnlineBadge />
-        <button onClick={() => syncAll()} className="px-3 py-2 bg-[#a6a6a6] text-white rounded hover:bg-gray-600 transition-colors">Sincronizar</button>
+        <button onClick={() => syncAll()} className="px-3 py-2 bg-[#000000] text-white rounded hover:bg-gray-600 transition-colors">Sincronizar</button>
       </div>
     </header>
   )

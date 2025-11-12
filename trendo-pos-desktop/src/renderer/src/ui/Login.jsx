@@ -92,7 +92,7 @@ export default function Login({ onAuthenticated }) {
   }
 
   return (
-  <div className="min-h-screen w-full flex flex-col items-center justify-center text-gray-900 dark:text-gray-100 transition-colors bg-[linear-gradient(140deg,_#fafafa_0%,_#e9eaec_25%,_#c9cbce_50%,_#8e9092_75%,_#2a2b2d_100%)] dark:bg-[linear-gradient(140deg,_#0d0d10_0%,_#17181b_30%,_#232529_55%,_#303338_75%,_#3e4247_100%)]">
+    <div className="min-h-screen w-full flex flex-col items-center justify-center bg-white dark:bg-neutral-900 text-gray-900 dark:text-gray-100 transition-colors">
       {/* Card */}
       <div className="w-[560px] max-w-[92vw] bg-gray-100 dark:bg-neutral-800 text-gray-900 dark:text-gray-100 rounded-xl shadow-lg border border-gray-200 dark:border-neutral-700 p-8">
         <div className="flex justify-center mb-6">

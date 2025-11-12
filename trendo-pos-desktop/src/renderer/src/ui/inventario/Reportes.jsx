@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import React, { useMemo, useState } from 'react'
 import { liveQuery } from 'dexie'
 import Sidebar from './Layout/Sidebar'

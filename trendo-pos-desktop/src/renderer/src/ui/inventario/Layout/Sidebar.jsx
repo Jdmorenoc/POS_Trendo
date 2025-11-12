@@ -66,10 +66,7 @@ export default function Sidebar({ onNavigate, currentView, onLogout }) {
 
   const items = [
     { key: 'inventory', label: 'Productos', icon: 'productos' },
-    { key: 'controlStock', label: 'Stock', icon: 'stock' },
-    { key: 'reportes', label: 'Reportes', icon: 'reportes' },
-    { key: 'devoluciones', label: 'Devoluciones', icon: 'devoluciones' },
-
+    { key: 'controlStock', label: 'Stock', icon: 'stock' }
   ]
 
   return (
@@ -121,8 +118,8 @@ export default function Sidebar({ onNavigate, currentView, onLogout }) {
           title="Cerrar sesión"
           aria-label="Cerrar sesión"
           className={`${collapsed
-            ? 'flex items-center justify-center text-red-500 border border-gray-700 bg-white hover:bg-red-500 hover:text-white transition-colors rounded-md w-12 h-12 ml-0 mr-2'
-            : 'w-full flex items-center justify-center gap-2 text-sm font-medium rounded-lg px-5 py-4 text-red-500 border border-gray-700 bg-white hover:bg-red-500 transition-colors hover:text-white ml-1 mr-4'}`}
+            ? 'flex items-center justify-center border rounded-md w-12 h-12 ml-0 mr-2 text-black bg-white hover:bg-gray-300 dark:text-gray-100 dark:bg-neutral-800 dark:border-neutral-700 dark:hover:bg-neutral-700 transition-colors'
+            : 'w-full flex items-center justify-center gap-2 text-sm font-medium rounded-lg px-5 py-4 ml-1 mr-4 border text-black bg-white hover:bg-gray-300 dark:text-gray-100 dark:bg-neutral-800 dark:border-neutral-700 dark:hover:bg-neutral-700 transition-colors'}`}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" strokeLinecap="round" strokeLinejoin="round"/>

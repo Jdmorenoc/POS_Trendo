@@ -6,11 +6,14 @@ import Sidebar from './Layout/Sidebar'
 import Header from './Layout/Header'
 import Footer from './Layout/Footer'
 import * as XLSX from 'xlsx'
+import { formatCOP } from '@/lib/currency'
 
 export default function ControlStock({ onBack, onLogout, onNavigate }) {
   const [items, setItems] = React.useState([])
   const [genderFilter, setGenderFilter] = React.useState('Todos')
   const [exportFormat, setExportFormat] = React.useState('xlsx')
+  // Ajustar stock modal removido
+  // Ajuste de stock movido a sección Productos (Inventory), se eliminan estados locales relacionados
   const STOCK_MIN_DEFAULT = 5
   React.useEffect(() => {
     const sub = liveQuery(() => db.table('items').where('deleted').equals(0).toArray()).subscribe({
@@ -30,7 +33,7 @@ export default function ControlStock({ onBack, onLogout, onNavigate }) {
       if (qty === 0) sin += 1
       else {
         disponibles += 1
-        if (qty <= 5) bajos += 1
+        if (qty <= 2) bajos += 1
       }
     }
     return { stockTotal, disponibles, bajos, sin }
@@ -59,20 +62,16 @@ export default function ControlStock({ onBack, onLogout, onNavigate }) {
       ITEM: r.item || r.id.slice(0, 8),
       Nombre: r.title || '',
       Genero: r.gender || 'Unisex',
-      XS: r.xs || 0,
-      S: r.s || 0,
-      M: r.m || 0,
-      L: r.l || 0,
-      XL: r.xl || 0,
       StockActual: r.qty,
       StockMinimo: r.min,
-      Estado: r.estado
+      Estado: r.estado,
+      Moneda: 'COP'
     }))
   }, [processed])
 
   function exportCSV() {
     const rows = buildRows()
-  const headers = Object.keys(rows[0] || { ITEM: '', Nombre: '', Genero: '', XS: 0, S: 0, M: 0, L: 0, XL: 0, StockActual: 0, StockMinimo: 0, Estado: '' })
+  const headers = Object.keys(rows[0] || { ITEM: '', Nombre: '', Genero: '', StockActual: '', StockMinimo: '', Estado: '', Moneda: '' })
     const csv = [
       headers.join(','),
       ...rows.map(r => headers.map(h => String(r[h]).replace(/"/g, '""')).join(','))
@@ -103,6 +102,8 @@ export default function ControlStock({ onBack, onLogout, onNavigate }) {
     if (exportFormat === 'xlsx') exportXLSX()
     else exportCSV()
   }
+
+  // submitAdjust eliminado (funcionalidad trasladada a Inventory)
 
   return (
     <div className="h-full flex bg-white dark:bg-neutral-900 dark:text-gray-100">
@@ -204,7 +205,7 @@ export default function ControlStock({ onBack, onLogout, onNavigate }) {
                         <th className="px-3 py-2 border-b">Nombre</th>
                         <th className="px-3 py-2 border-b">Género</th>
                         <th className="px-3 py-2 border-b">Stock Actual</th>
-                        <th className="px-3 py-2 border-b">Stock Mínimo</th>
+                        <th className="px-3 py-2 border-b">Precio</th>
                         <th className="px-3 py-2 border-b">Estado</th>
                       </tr>
                     </thead>
@@ -215,7 +216,7 @@ export default function ControlStock({ onBack, onLogout, onNavigate }) {
                           <td className="px-3 py-2 text-black dark:text-gray-100">{it.title || '—'}</td>
                           <td className="px-3 py-2 text-gray-700 dark:text-gray-200 text-xs">{it.gender || 'Unisex'}</td>
                           <td className="px-3 py-2 text-black dark:text-gray-100 font-medium">{it.qty}</td>
-                          <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{it.min}</td>
+                          <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{typeof it.price === 'number' ? formatCOP(it.price) : '—'}</td>
                           <td className="px-3 py-2">
                             {it.estado === 'Disponible' && (
                               <span className="px-2 py-1 rounded text-xs bg-green-100 text-green-700">Disponible</span>
@@ -257,13 +258,12 @@ export default function ControlStock({ onBack, onLogout, onNavigate }) {
                     Exportar
                   </button>
                 </div>
-                <button className="px-4 py-2 bg-[#a6a6a6] text-white rounded hover:bg-gray-600 transition-colors">
-                  Ajustar Stock
-                </button>
+                {/* Botón Ajustar Stock eliminado: funcionalidad movida a Productos */}
               </div>
             </div>
           </div>
         </section>
+        {/* Modal de ajuste eliminado */}
 
         <div className="mt-auto">
           <Footer compact />

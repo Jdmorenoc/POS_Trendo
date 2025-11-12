@@ -61,6 +61,44 @@ db.version(6).stores({
   })
 })
 
+// Version 7: add shifts table to manage daily opening/closing of cash register
+db.version(7).stores({
+  items: 'id, item, gender, updated_at, dirty, deleted, xs, s, m, l, xl',
+  meta: 'key',
+  returns: 'id, itemId, purchased_at, created_at, dirty, deleted',
+  sales: 'id, created_at, updated_at, method, total, items, dirty, deleted',
+  shifts: 'id, opened_at, closed_at, userEmail, initialCash, finalCash, active'
+})
+
+// Version 8: add shiftId to sales to associate transactions with shift
+db.version(8).stores({
+  items: 'id, item, gender, updated_at, dirty, deleted, xs, s, m, l, xl',
+  meta: 'key',
+  returns: 'id, itemId, purchased_at, created_at, dirty, deleted',
+  sales: 'id, created_at, updated_at, method, total, items, shiftId, dirty, deleted',
+  shifts: 'id, opened_at, closed_at, userEmail, initialCash, finalCash, active'
+}).upgrade(tx => {
+  // Ensure existing sales have shiftId initialized
+  return tx.table('sales').toCollection().modify(s => {
+    if (typeof s.shiftId === 'undefined') s.shiftId = ''
+  })
+})
+
+// Version 9: add customers table + extend sales with customerId and tipoComprobante
+db.version(9).stores({
+  items: 'id, item, gender, updated_at, dirty, deleted, xs, s, m, l, xl',
+  meta: 'key',
+  returns: 'id, itemId, purchased_at, created_at, dirty, deleted',
+  sales: 'id, created_at, updated_at, method, total, items, shiftId, customerId, tipoComprobante, dirty, deleted',
+  shifts: 'id, opened_at, closed_at, userEmail, initialCash, finalCash, active',
+  customers: 'id, identificationNumber, identificationType, type, email'
+}).upgrade(tx => {
+  return tx.table('sales').toCollection().modify(s => {
+    if (typeof s.customerId === 'undefined') s.customerId = ''
+    if (typeof s.tipoComprobante === 'undefined') s.tipoComprobante = ''
+  })
+})
+
 export async function getMeta(key, defaultValue = null) {
   const value = await db.table('meta').get(key)
   return value?.value ?? defaultValue
@@ -163,9 +201,17 @@ export async function deleteReturn(id) {
 }
 
 // Sales API
-export async function addSale({ total, items, method, created_at }) {
+export async function addSale({ total, items, method, created_at, customerId, tipoComprobante }) {
   const id = (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2))
   const now = new Date().toISOString()
+  // Attach current shift if active
+  let shiftId = ''
+  try {
+    const active = await getActiveShift()
+    if (active && active.id) shiftId = active.id
+  } catch {
+    // ignore shift attachment errors
+  }
   const record = {
     id,
     total: parseFloat(total) || 0,
@@ -173,6 +219,9 @@ export async function addSale({ total, items, method, created_at }) {
     method: method || 'Efectivo',
     created_at: created_at || now,
     updated_at: now,
+    shiftId,
+    customerId: customerId || '',
+    tipoComprobante: tipoComprobante || '',
     dirty: 1,
     deleted: 0
   }
@@ -182,4 +231,99 @@ export async function addSale({ total, items, method, created_at }) {
 
 export async function listSales() {
   return db.table('sales').where('deleted').equals(0).reverse().sortBy('created_at')
+}
+
+// Shifts API
+export async function getActiveShift() {
+  return db.table('shifts').where('active').equals(1).first()
+}
+
+export async function openShift({ userEmail, initialCash }) {
+  const existing = await getActiveShift()
+  if (existing) throw new Error('Ya hay un turno abierto')
+  const id = (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2))
+  const opened_at = new Date().toISOString()
+  const record = {
+    id,
+    userEmail: userEmail || '',
+    opened_at,
+    closed_at: null,
+    initialCash: parseFloat(initialCash) || 0,
+    finalCash: 0,
+    active: 1
+  }
+  await db.table('shifts').put(record)
+  return record
+}
+
+export async function closeShift({ finalCash }) {
+  const active = await getActiveShift()
+  if (!active) throw new Error('No hay turno activo')
+  const closed_at = new Date().toISOString()
+  active.closed_at = closed_at
+  active.finalCash = parseFloat(finalCash) || 0
+  active.active = 0
+  await db.table('shifts').put(active)
+  return active
+}
+
+export async function listShifts(limit = 50) {
+  return db.table('shifts').orderBy('opened_at').reverse().limit(limit).toArray()
+}
+
+// Customers API
+export async function upsertCustomer(c) {
+  const id = c.id || (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2))
+  const now = new Date().toISOString()
+  const record = {
+    id,
+    identificationNumber: String(c.identificationNumber||'').trim(),
+    identificationType: c.identificationType || '',
+    type: c.type || 'Persona', // Persona | Empresa
+    nombres: c.nombres || '',
+    apellidos: c.apellidos || '',
+    razonSocial: c.razonSocial || '',
+    email: c.email || '',
+    phoneIndicative: c.phoneIndicative || '',
+    phoneNumber: c.phoneNumber || '',
+    created_at: c.created_at || now,
+    updated_at: now
+  }
+  await db.table('customers').put(record)
+  return record
+}
+
+export async function findCustomerByIdentification(identificationNumber) {
+  if (!identificationNumber) return null
+  return db.table('customers').where('identificationNumber').equals(String(identificationNumber).trim()).first()
+}
+
+export async function listCustomers(limit = 100) {
+  return db.table('customers').limit(limit).toArray()
+}
+
+// Stub DIAN data fetch - in real implementation would call external API
+export async function fetchDianData(identificationType, identificationNumber) {
+  // Simulate network delay
+  await new Promise(res => setTimeout(res, 400)) // eslint-disable-line no-undef
+  // Return mock data based on type
+  if (!identificationNumber) return null
+  // const num = String(identificationNumber)
+  if (identificationType === 'NIT') {
+    return {
+      type: 'Empresa',
+      razonSocial: 'EMPRESA DEMO S.A.S.',
+      email: 'contacto@empresademo.com',
+      phoneIndicative: '+57',
+      phoneNumber: '3001234567'
+    }
+  }
+  return {
+    type: 'Persona',
+    nombres: 'Juan',
+    apellidos: 'Pérez',
+    email: 'juan.perez@example.com',
+    phoneIndicative: '+57',
+    phoneNumber: '3009876543'
+  }
 }

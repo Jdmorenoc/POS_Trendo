@@ -59,12 +59,12 @@ export async function syncAll() {
   // Push first to reduce conflicts, then pull
   try {
     await pushToCloud()
-  } catch (e) {
+  } catch {
     // ignore, will retry later
   }
   try {
     await pullFromCloud()
-  } catch (e) {
+  } catch {
     // ignore
   }
 }
@@ -87,7 +87,7 @@ export function watchRealtime() {
     return () => {
       supabase.removeChannel(channel)
     }
-  } catch (e) {
+  } catch {
     // ignore
     return () => {}
   }

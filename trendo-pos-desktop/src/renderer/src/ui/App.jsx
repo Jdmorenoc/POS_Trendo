@@ -4,10 +4,11 @@ import Menu from './Menu'
 import Inventory from './inventario/Inventory'
 import ControlStock from './inventario/ControlStock'
 import Configuracion from './configuracion/Configuracion'
-import Devoluciones from './inventario/Devoluciones'
-import Reportes from './inventario/Reportes'
+// Devoluciones moved under Caja module
+import DevolucionesCaja from './caja/DevolucionesCaja'
 import Cash from './caja/Cash'
 import Contabilidad from './contabilidad/Contabilidad'
+import Payment from './caja/Payment'
 import { supabase } from '@/lib/supabase'
 
 export default function App() {
@@ -95,10 +96,11 @@ export default function App() {
   if (view === 'inventory') return <Inventory user={user} onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />
   if (view === 'controlStock') return <ControlStock onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />
   if (view === 'configuracion') return <Configuracion onBack={() => setView('menu')} />
-  if (view === 'cash') return <Cash onBack={() => setView('menu')} onLogout={handleLogout} />
-    if (view === 'devoluciones') return <Devoluciones onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />
-  if (view === 'reportes') return <Reportes onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />
-  if (view === 'contabilidad') return <Contabilidad onBack={() => setView('menu')} onLogout={handleLogout} />
+  if (view === 'cash') return <Cash onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />
+  if (view === 'devoluciones') return <DevolucionesCaja onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />
+  if (view === 'payment') return <Payment onBack={() => setView('cash')} onNavigate={setView} />
+  // Reportes moved under Contabilidad section
+  if (view === 'contabilidad') return <Contabilidad onBack={() => setView('menu')} />
   return (
     <Menu
       onGoInventory={() => setView('inventory')}
