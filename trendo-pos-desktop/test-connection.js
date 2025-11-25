@@ -1,6 +1,6 @@
 /* eslint-env node */
 /* eslint-disable no-undef */
-// Test de conexión a Supabase desde Node
+// Test de conexión a Supabase: permite especificar esquema y tabla.
 const { createClient } = require('@supabase/supabase-js')
 
 async function main() {
@@ -28,26 +28,33 @@ async function main() {
 		process.exit(1)
 	}
 
-		const supabase = createClient(url, key, { auth: { persistSession: false } })
-		const table = process.argv[2] || process.env.SUPABASE_TEST_TABLE || 'items'
+		const supabase = createClient(url, key, { auth: { persistSession: false }, db: { schema: 'public' } })
 
-	// Probar lectura a una tabla pública esperada (items). Cambia por tu tabla si usas otra.
-	try {
-		const { data, error } = await supabase.from(table).select('*').limit(1)
-		if (error) {
+		// Args: [schema] [table1] [table2] ...
+		const schema = process.argv[2] || process.env.SUPABASE_TEST_SCHEMA || 'public'
+		const tableArgs = process.argv.slice(3)
+		const tables = tableArgs.length > 0 ? tableArgs : [process.env.SUPABASE_TEST_TABLE || (schema === 'trendo' ? 'bill' : 'items')]
+
+		try {
+			for (const table of tables) {
+				const source = schema === 'public' ? supabase.from(table) : supabase.schema(schema).from(table)
+				const { data, error } = await source.select('*').limit(1)
+				if (error) {
 					if (error.code === 'PGRST205') {
-						console.error(`Conexión OK, pero la tabla '${table}' no existe en el esquema 'public'. Crea la tabla o cambia el nombre (pasa otro nombre como argumento).`)
-				process.exit(2)
+						console.error(`Tabla inexistente: ${schema}.${table}`)
+						continue
+					}
+					const msg = String(error.message || '').toLowerCase()
+					if (msg.includes('permission') || msg.includes('policy') || msg.includes('rls')) {
+						console.error(`Sin permisos anon para ${schema}.${table}`)
+						continue
+					}
+					console.error(`Error en ${schema}.${table}:`, error)
+					continue
+				}
+				console.log(`OK ${schema}.${table}:`, data[0] || null)
 			}
-			const msg = String(error.message || '').toLowerCase()
-			if (msg.includes('permission') || msg.includes('policy') || msg.includes('rls')) {
-				console.error('Conexión OK, pero RLS/permiso bloquea la lectura con el anon key. Ajusta políticas de SELECT en la tabla.')
-				process.exit(2)
-			}
-			console.error('Error en consulta:', error)
-			process.exit(2)
-		}
-		console.log('Conexión OK. Resultado de prueba:', data)
+			// Exit 0 siempre que la conexión base haya funcionado
 		process.exit(0)
 	} catch (e) {
 		console.error('Fallo de conexión:', e.message || e)

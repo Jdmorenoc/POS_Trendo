@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { openShift, closeShift, getActiveShift } from '@/lib/db'
-import { formatCOPInput, parseCOP } from '@/lib/currency'
+import { formatCOPInput, parseCOP } from '@/lib/currency' // corrige el path
 
 export default function Menu({ onGoInventory, onGoCash, onGoContabilidad, onGoConfiguracion, onLogout, user }) {
   const [activeShift, setActiveShift] = useState(null)
@@ -9,6 +9,7 @@ export default function Menu({ onGoInventory, onGoCash, onGoContabilidad, onGoCo
   const [finalCashInput, setFinalCashInput] = useState('')
   const [errorShift, setErrorShift] = useState('')
   const [showShiftModal, setShowShiftModal] = useState(false)
+
 
   useEffect(() => {
     refreshShift()
@@ -50,14 +51,9 @@ export default function Menu({ onGoInventory, onGoCash, onGoContabilidad, onGoCo
   }
 
   return (
-    <div className="min-h-screen p-8 bg-[#cbcaca] dark:bg-neutral-900 text-gray-900 dark:text-gray-100 transition-colors">
-      <header className="flex items-center justify-between mb-10">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-black rounded-full flex items-center justify-center text-white font-semibold">T</div>
-          <div className="text-xl font-semibold text-black dark:text-white">Trendo</div>
-        </div>
-        <button onClick={onLogout} className="px-3 py-2 bg-white dark:bg-neutral-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-neutral-700 rounded hover:bg-red-500 hover:text-white transition-colors">Cerrar Sesión</button>
-      </header>
+    <main className="p-8">
+      <div className="flex items-center justify-between mb-6">
+      </div>
 
       {/* Tarjeta TURNO */}
       <div className="max-w-3xl mx-auto mb-8">
@@ -218,6 +214,6 @@ export default function Menu({ onGoInventory, onGoCash, onGoContabilidad, onGoCo
           <div className="text-sm text-gray-500 dark:text-gray-400">Preferencias: tamaño de fuente y contraste.</div>
         </button>
       </div>
-    </div>
+    </main>
   )
 }
