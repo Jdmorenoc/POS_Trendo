@@ -115,7 +115,7 @@ export async function listItems() {
 export async function upsertItem(item) {
   const now = new Date().toISOString()
   const total = (item.xs || 0) + (item.s || 0) + (item.m || 0) + (item.l || 0) + (item.xl || 0)
-  const toSave = { 
+  const toSave = {
     ...item,
     quantity: total || item.quantity || 0,
     updated_at: item.updated_at || now,

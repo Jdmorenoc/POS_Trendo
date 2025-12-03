@@ -1,6 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
 
-// In dev, Vite injects import.meta.env from .env files. In production, pass via build-time env or preload.
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 

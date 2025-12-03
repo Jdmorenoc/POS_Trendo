@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { listReturns, addReturn, deleteReturn, listItems } from '@/lib/db'
+import { listReturns, addReturn, deleteReturn, listItems } from '@/services/db'
 import { liveQuery } from 'dexie'
 import Sidebar from './Layout/Sidebar'
 import Header from './Layout/Header'

@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
-import { getMeta, setMeta, findItemByCode, adjustStockByItem, addSale, getActiveShift } from '@/lib/db'
+import { getMeta, setMeta, findItemByCode, adjustStockByItem, addSale, getActiveShift } from '@/services/db'
 import { formatCOP, formatCOPInput, parseCOP } from '@/lib/currency'
 
 // Pantalla de cobro final: métodos de pago, desglose y generación de factura

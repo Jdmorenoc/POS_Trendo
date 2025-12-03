@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { onConnectivityChange } from '@/lib/sync'
+import { onConnectivityChange } from '@/services/sync'
 
 function ArrowLeftIcon({ className = 'w-5 h-5' }) {
   return (

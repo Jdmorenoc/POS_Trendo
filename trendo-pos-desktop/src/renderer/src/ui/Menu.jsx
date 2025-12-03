@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { openShift, closeShift, getActiveShift } from '@/lib/db'
+import { openShift, closeShift, getActiveShift } from '@/services/db'
 import { formatCOPInput, parseCOP } from '@/lib/currency' // corrige el path
 
 export default function Menu({ onGoInventory, onGoCash, onGoContabilidad, onGoConfiguracion, onLogout, user }) {
@@ -51,12 +51,12 @@ export default function Menu({ onGoInventory, onGoCash, onGoContabilidad, onGoCo
   }
 
   return (
-    <main className="p-8">
+    <main className="min-h-screen p-8 flex flex-col">
       <div className="flex items-center justify-between mb-6">
       </div>
 
       {/* Tarjeta TURNO */}
-      <div className="max-w-3xl mx-auto mb-8">
+      <div className="max-w-3xl mx-auto mb-8 w-full">
         <div className="rounded-xl border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-6 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex items-start gap-4 flex-1">
             <div className="w-12 h-12 rounded-lg flex items-center justify-center shrink-0 bg-white dark:bg-neutral-700 border border-gray-200 dark:border-neutral-600">
@@ -212,6 +212,25 @@ export default function Menu({ onGoInventory, onGoCash, onGoContabilidad, onGoCo
         <button onClick={onGoConfiguracion} className="aspect-[4/2] rounded-xl border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-gray-50 dark:hover:bg-neutral-700 transition text-left p-6 hover:border-gray-400 dark:hover:border-neutral-600 hover:shadow-md">
           <div className="text-2xl font-semibold text-black dark:text-white">Configuración</div>
           <div className="text-sm text-gray-500 dark:text-gray-400">Preferencias: tamaño de fuente y contraste.</div>
+        </button>
+      </div>
+      <div className="mt-auto pt-6">
+        <button
+          type="button"
+          onClick={onLogout}
+          disabled={!onLogout}
+          className="inline-flex items-center gap-2 rounded border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-700/40 dark:text-red-300 dark:hover:bg-red-900/30"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            className="h-4 w-4"
+            fill="currentColor"
+          >
+            <path d="M14.75 4a.75.75 0 0 1 .75.75v2a.75.75 0 0 1-1.5 0V5.5h-6v13h6v-1.25a.75.75 0 0 1 1.5 0V19.5a1.5 1.5 0 0 1-1.5 1.5h-6A1.5 1.5 0 0 1 7 19.5v-13A1.5 1.5 0 0 1 8.5 5h6.25zm3.53 7.53a.75.75 0 0 1 0 1.06l-3 3a.75.75 0 1 1-1.06-1.06l1.72-1.72H12a.75.75 0 0 1 0-1.5h3.94l-1.72-1.72a.75.75 0 1 1 1.06-1.06l3 3z" />
+          </svg>
+          <span>Cerrar sesión</span>
         </button>
       </div>
     </main>

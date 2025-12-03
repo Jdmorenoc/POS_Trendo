@@ -4,7 +4,7 @@ import { formatCOP } from '@/lib/currency'
 import { liveQuery } from 'dexie'
 import Header from '../inventario/Layout/Header'
 import Footer from '../inventario/Layout/Footer'
-import { db, listShifts } from '@/lib/db'
+import { db, listShifts } from '@/services/db'
 import * as XLSX from 'xlsx'
 
 function useLiveSales() {

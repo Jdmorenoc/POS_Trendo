@@ -3,7 +3,7 @@ import { liveQuery } from 'dexie'
 import Sidebar from './Layout/Sidebar'
 import Header from './Layout/Header'
 import Footer from './Layout/Footer'
-import { db } from '@/lib/db'
+import { db } from '@/services/db'
 
 // Minimal hook for real-time Dexie reactivity
 function useLiveSales() {

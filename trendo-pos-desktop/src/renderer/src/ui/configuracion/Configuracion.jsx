@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { syncAll } from '@/lib/sync'
+import { syncAll } from '@/services/sync'
 import Header from '../inventario/Layout/Header'
 import Footer from '../inventario/Layout/Footer'
 

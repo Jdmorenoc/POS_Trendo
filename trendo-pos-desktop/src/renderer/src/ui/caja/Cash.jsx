@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react'
-import { setMeta, findItemByCode, getActiveShift, findCustomerByIdentification, upsertCustomer, fetchDianData } from '@/lib/db'
+import { setMeta, findItemByCode, getActiveShift, findCustomerByIdentification, upsertCustomer, fetchDianData } from '@/services/db'
 import SidebarCaja from './Layout/Sidebar'
 import { formatCOP } from '@/lib/currency'
 import { useScanner } from '@/lib/useScanner'

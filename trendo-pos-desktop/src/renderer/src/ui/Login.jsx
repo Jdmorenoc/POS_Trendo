@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { onConnectivityChange } from '@/lib/sync'
-import { supabase } from '@/lib/supabase'
+import { onConnectivityChange } from '@/services/sync'
+import { loginWithEmail, registerWithEmail, VALID_ROLES } from '@/services/authLogin'
 
 function WifiIcon({ className = 'w-4 h-4' }) {
   return (
@@ -44,15 +44,15 @@ function ConnectionBar() {
   const online = useOnline()
   const dateLabel = useNowString()
   return (
-    <div className="mx-auto mt-4 w-[560px] max-w-[92vw] bg-[#f8fafc] text-gray-800 rounded-xl shadow border flex items-center justify-between px-5 py-3 shadow-md">
+    <div className="mx-auto mt-4 w-[560px] max-w-[92vw] rounded-xl border bg-[#f8fafc] text-gray-800 shadow-md flex items-center justify-between px-5 py-3 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-700">
       <div className="flex items-center gap-3">
-        <WifiIcon className={online ? 'w-4 h-4 text-green-600' : 'w-4 h-4 text-red-600'} />
-        <CloudIcon className={online ? 'w-4 h-4 text-green-600' : 'w-4 h-4 text-red-600'} />
-        <span className={online ? 'text-green-700 font-medium' : 'text-red-600 font-medium'}>
+        <WifiIcon className={online ? 'w-4 h-4 text-green-600 dark:text-green-300' : 'w-4 h-4 text-red-600 dark:text-red-400'} />
+        <CloudIcon className={online ? 'w-4 h-4 text-green-600 dark:text-green-300' : 'w-4 h-4 text-red-600 dark:text-red-400'} />
+        <span className={online ? 'font-medium text-green-700 dark:text-green-300' : 'font-medium text-red-600 dark:text-red-400'}>
           {online ? 'Conectado' : 'Desconectado'}
         </span>
       </div>
-      <div className="text-sm text-gray-500">{dateLabel}</div>
+      <div className="text-sm text-gray-500 dark:text-gray-400">{dateLabel}</div>
     </div>
   )
 }
@@ -63,27 +63,51 @@ export default function Login({ onAuthenticated }) {
   const [loading, setLoading] = useState(false)
   const [mode, setMode] = useState('login') // or 'register'
   const [error, setError] = useState('')
+  const [info, setInfo] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [role, setRole] = useState('Cajero')
+  const [firstName, setFirstName] = useState('')
+  const [secondName, setSecondName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [secondLastName, setSecondLastName] = useState('')
+
+  const isRegister = mode === 'register'
+
+  function switchMode(nextMode) {
+    setMode(nextMode)
+    setError('')
+    setInfo('')
+    setPassword('')
+    setConfirmPassword('')
+    setFirstName('')
+    setSecondName('')
+    setLastName('')
+    setSecondLastName('')
+    setRole('Cajero')
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
     setLoading(true)
     setError('')
     try {
-      if (supabase?.auth) {
-        if (mode === 'login') {
-          const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-          if (error) throw error
-          onAuthenticated?.(data?.user || { email })
-        } else {
-          const { data, error } = await supabase.auth.signUp({ email, password })
-          if (error) throw error
-          // Si requiere verificación, aún seguimos a la app
-          onAuthenticated?.(data?.user || { email })
-        }
-      } else {
-        // Modo sin Supabase: permitir acceso mock
-        onAuthenticated?.({ email })
+      if (isRegister && password !== confirmPassword) {
+        throw new Error('Las contraseñas no coinciden')
       }
+      const result = isRegister
+        ? await registerWithEmail(email, password, role, {
+            firstName,
+            secondName,
+            lastName,
+            secondLastName
+          })
+        : await loginWithEmail(email, password)
+      if (isRegister && result?.requiresLogin) {
+        setInfo(result.message || 'Registro exitoso. Revisa tu correo para confirmar la cuenta.')
+        switchMode('login')
+        return
+      }
+      onAuthenticated?.(result)
     } catch (err) {
       setError(err?.message || 'Error al autenticar')
     } finally {
@@ -100,6 +124,9 @@ export default function Login({ onAuthenticated }) {
             Trendo
           </div>
         </div>
+        <h2 className="text-xl font-semibold text-center mb-6">
+          {isRegister ? 'Crea tu cuenta' : 'Inicia sesión'}
+        </h2>
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
@@ -113,6 +140,52 @@ export default function Login({ onAuthenticated }) {
               placeholder="cajero@tienda.com"
             />
           </div>
+          {isRegister && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm mb-1">Primer nombre</label>
+                <input
+                  type="text"
+                  required
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  className="w-full px-3 py-2 rounded border bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 outline-none focus:ring-2 focus:ring-blue-400"
+                  placeholder="Juan"
+                />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Segundo nombre</label>
+                <input
+                  type="text"
+                  value={secondName}
+                  onChange={(e) => setSecondName(e.target.value)}
+                  className="w-full px-3 py-2 rounded border bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 outline-none focus:ring-2 focus:ring-blue-400"
+                  placeholder="Carlos"
+                />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Primer apellido</label>
+                <input
+                  type="text"
+                  required
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  className="w-full px-3 py-2 rounded border bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 outline-none focus:ring-2 focus:ring-blue-400"
+                  placeholder="Pérez"
+                />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Segundo apellido</label>
+                <input
+                  type="text"
+                  value={secondLastName}
+                  onChange={(e) => setSecondLastName(e.target.value)}
+                  className="w-full px-3 py-2 rounded border bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 outline-none focus:ring-2 focus:ring-blue-400"
+                  placeholder="García"
+                />
+              </div>
+            </div>
+          )}
           <div>
             <label className="block text-sm mb-1">Contraseña</label>
             <input
@@ -124,24 +197,60 @@ export default function Login({ onAuthenticated }) {
               placeholder="••••••••"
             />
           </div>
+          {isRegister && (
+            <>
+            <div>
+              <label className="block text-sm mb-1">Confirmar contraseña</label>
+              <input
+                type="password"
+                required
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-full px-3 py-2 rounded border bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 outline-none focus:ring-2 focus:ring-blue-400"
+                placeholder="Repite tu contraseña"
+              />
+            </div>
+            <div>
+              <span className="block text-sm font-medium mb-2">Selecciona el tipo de empleado</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {VALID_ROLES.map((option) => {
+                  const selected = role === option
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => setRole(option)}
+                      className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${selected
+                        ? 'border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-900/30 dark:text-blue-200'
+                        : 'border-gray-300 bg-white text-gray-700 hover:border-blue-400 dark:border-neutral-600 dark:bg-neutral-700 dark:text-gray-200'}`}
+                    >
+                      {option}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            </>
+          )}
 
           {error && <div className="text-sm text-red-600">{error}</div>}
+          {!error && info && <div className="text-sm text-blue-600 dark:text-blue-300">{info}</div>}
 
           <button
             type="submit"
             disabled={loading}
             className="w-full py-2 rounded bg-black text-white font-semibold hover:bg-gray-900 disabled:opacity-60"
           >
-            {mode === 'login' ? 'Iniciar Sesión' : 'Crear cuenta'}
+            {loading ? (isRegister ? 'Creando cuenta…' : 'Iniciando…') : (isRegister ? 'Crear cuenta' : 'Iniciar sesión')}
           </button>
         </form>
 
         <div className="mt-4 text-xs text-gray-600 dark:text-gray-400">
           Acceso exclusivo para personal autorizado ·{' '}
-          {mode === 'login' ? (
-            <button className="text-blue-600 hover:underline" onClick={() => setMode('register')}>Crear cuenta</button>
+          {isRegister ? (
+            <button className="text-blue-600 hover:underline" onClick={() => switchMode('login')}>Ya tengo cuenta</button>
           ) : (
-            <button className="text-blue-600 hover:underline" onClick={() => setMode('login')}>Ya tengo cuenta</button>
+            <button className="text-blue-600 hover:underline" onClick={() => switchMode('register')}>Crear cuenta</button>
           )}
         </div>
       </div>

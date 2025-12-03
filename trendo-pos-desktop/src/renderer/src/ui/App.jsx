@@ -9,7 +9,7 @@ import DevolucionesCaja from './caja/DevolucionesCaja'
 import Cash from './caja/Cash'
 import Contabilidad from './contabilidad/Contabilidad'
 import Payment from './caja/Payment'
-import { supabase } from '@/lib/supabase'
+import { supabase } from '@/services/supabaseClient'
 
 export default function App() {
   const [user, setUser] = useState(null)
@@ -108,6 +108,7 @@ export default function App() {
       onGoContabilidad={() => setView('contabilidad')}
       onGoConfiguracion={() => setView('configuracion')}
       onLogout={handleLogout}
+      user={user}
     />
   )
 }

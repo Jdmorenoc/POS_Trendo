@@ -1,4 +1,4 @@
-import { supabase } from './supabase'
+import { supabase } from './supabaseClient'
 import { getDirty, markClean, bulkUpsert, getMeta, setMeta, db } from './db'
 
 const TABLE = 'items'
