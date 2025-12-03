@@ -67,9 +67,9 @@ export async function loginWithEmail(email, password) {
     let employeeData = null
 
     try {
-        // Consultamos la tabla real en tu esquema personalizado 'trendo'
+        // Consultamos la tabla real en tu esquema personalizado
         const { data: dbData } = await supabase
-            .schema('trendo') 
+            .schema('trendo') // <--- IMPORTANTE: Esquema trendo
             .from('employee')
             .select('Type_employee, first_name, last_name, second_name, second_last_name')
             .eq('user_id', rawUser.id)
@@ -80,7 +80,7 @@ export async function loginWithEmail(email, password) {
             typeEmployee = normalizeTypeEmployee(dbData.Type_employee)
         }
     } catch (err) {
-        console.warn("No se pudo sincronizar perfil de empleado (usando metadata):", err)
+        console.warn("No se pudo sincronizar perfil de empleado:", err)
     }
 
     // C. Construir objeto de usuario unificado
@@ -115,9 +115,9 @@ export async function loginWithEmail(email, password) {
 }
 
 // ==========================================
-// 2. FUNCIÓN DE REGISTRO
+// 2. FUNCIÓN DE REGISTRO (CORREGIDA Y ROBUSTA)
 // ==========================================
-export async function registerWithEmail(email, password, roleInput, names) {
+export async function registerWithEmail(email, password, roleInput, names, extraData) {
   const trimmedEmail = String(email || '').trim().toLowerCase()
   const safePassword = String(password || '')
   const typeEmployee = normalizeTypeEmployee(roleInput)
@@ -129,38 +129,52 @@ export async function registerWithEmail(email, password, roleInput, names) {
     secondLastName: (names?.secondLastName || '').trim()
   }
 
+  // --- VALIDACIONES ---
   if (!trimmedEmail || !safePassword) throw new Error('Datos incompletos')
   if (!person.firstName || !person.lastName) throw new Error('Nombre y Apellido requeridos')
+  
+  // ROBUSTEZ: Buscamos el documento en extraData O dentro de 'names' (por si hubo confusión al enviar)
+  const docValue = extraData?.document || names?.document || names?.em_document
+  const phoneValue = extraData?.phone || names?.phone
+
+  // Validamos que venga la cédula (obligatorio en BD)
+  if (!docValue) throw new Error('La Cédula/Documento es obligatoria')
 
   // --- MODO ONLINE (SUPABASE) ---
   if (hasSupabaseAuth()) {
-    // 1. Crear el usuario
+    
+    // Blindaje 1: Limpiar sesión previa
+    await supabase.auth.signOut()
+
+    // 1. Crear usuario con Metadata completa
     const { data, error } = await supabase.auth.signUp({
       email: trimmedEmail,
       password: safePassword,
       options: {
-        // Redirección explícita ayuda a manejar el flujo
         emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
         data: {
+          // Datos básicos
           type_employee: typeEmployee,
           first_name: person.firstName,
           second_name: person.secondName,
           last_name: person.lastName,
-          second_last_name: person.secondLastName
+          second_last_name: person.secondLastName,
+          
+          // --- NUEVOS DATOS PARA EL TRIGGER SQL ---
+          em_document: docValue, 
+          phone: phoneValue
         }
       }
     })
 
     if (error) throw error
 
-    // 2. EL TRUCO DE SEGURIDAD (CERRAR SESIÓN FORZADA)
-    // Si Supabase devuelve una sesión activa, la cerramos inmediatamente.
-    // Esto evita que el sistema te deje entrar sin verificar el correo.
+    // Blindaje 2: Cerrar sesión inmediatamente si se abrió
+    // Esto previene entrar al software sin verificar email
     if (data.session) {
         await supabase.auth.signOut() 
     }
 
-    // 3. Retornar señal para redirección al Login
     return { 
         success: true, 
         requiresLogin: true, 
@@ -175,7 +189,9 @@ export async function registerWithEmail(email, password, roleInput, names) {
   store[trimmedEmail] = {
     password: safePassword,
     type_employee: typeEmployee,
-    ...person
+    ...person,
+    em_document: docValue,
+    phone: phoneValue
   }
   setStore(store)
   

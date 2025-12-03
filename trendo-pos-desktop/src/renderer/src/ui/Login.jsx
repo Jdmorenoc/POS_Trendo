@@ -70,6 +70,8 @@ export default function Login({ onAuthenticated }) {
   const [secondName, setSecondName] = useState('')
   const [lastName, setLastName] = useState('')
   const [secondLastName, setSecondLastName] = useState('')
+  const [documentId, setDocumentId] = useState('')
+  const [phone, setPhone] = useState('')
 
   const isRegister = mode === 'register'
 
@@ -83,6 +85,8 @@ export default function Login({ onAuthenticated }) {
     setSecondName('')
     setLastName('')
     setSecondLastName('')
+    setDocumentId('')
+    setPhone('')
     setRole('Cajero')
   }
 
@@ -99,7 +103,9 @@ export default function Login({ onAuthenticated }) {
             firstName,
             secondName,
             lastName,
-            secondLastName
+            secondLastName,
+            document: documentId,
+            phone
           })
         : await loginWithEmail(email, password)
       if (isRegister && result?.requiresLogin) {
@@ -209,6 +215,31 @@ export default function Login({ onAuthenticated }) {
                 className="w-full px-3 py-2 rounded border bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 outline-none focus:ring-2 focus:ring-blue-400"
                 placeholder="Repite tu contraseña"
               />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm mb-1">Documento de identidad</label>
+                <input
+                  type="text"
+                  required
+                  value={documentId}
+                  onChange={(e) => setDocumentId(e.target.value)}
+                  className="w-full px-3 py-2 rounded border bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 outline-none focus:ring-2 focus:ring-blue-400"
+                  placeholder="1020304050"
+                />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Número celular</label>
+                <input
+                  type="tel"
+                  inputMode="tel"
+                  required
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  className="w-full px-3 py-2 rounded border bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 outline-none focus:ring-2 focus:ring-blue-400"
+                  placeholder="3001234567"
+                />
+              </div>
             </div>
             <div>
               <span className="block text-sm font-medium mb-2">Selecciona el tipo de empleado</span>
