@@ -201,3 +201,39 @@ export async function registerWithEmail(email, password, roleInput, names, extra
 }
 
 export { VALID_ROLES }
+
+// ==========================================
+// 3. RECUPERACIÓN DE CONTRASEÑA
+// ==========================================
+export async function sendPasswordRecovery(email) {
+  const trimmedEmail = String(email || '').trim().toLowerCase()
+  if (!trimmedEmail) throw new Error('Correo electrónico requerido')
+
+  if (hasSupabaseAuth()) {
+    // Preferir la API moderna si está disponible
+    try {
+      const redirectTo = typeof window !== 'undefined' ? window.location.origin : undefined
+      if (typeof supabase.auth.resetPasswordForEmail === 'function') {
+        const { data, error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, { redirectTo })
+        if (error) throw error
+        return { success: true, message: 'Correo de recuperación enviado. Revisa tu bandeja.' }
+      }
+
+      // Fallback para versiones antiguas del cliente
+      if (supabase.auth.api && typeof supabase.auth.api.resetPasswordForEmail === 'function') {
+        const { data, error } = await supabase.auth.api.resetPasswordForEmail(trimmedEmail)
+        if (error) throw error
+        return { success: true, message: 'Correo de recuperación enviado. Revisa tu bandeja.' }
+      }
+
+      throw new Error('Funcionalidad de recuperación no disponible en este cliente de Supabase')
+    } catch (err) {
+      throw err
+    }
+  }
+
+  // Modo offline: simulamos envío si el usuario existe localmente
+  const store = getStore()
+  if (!store[trimmedEmail]) throw new Error('Usuario no encontrado (Modo Offline)')
+  return { success: true, message: 'Correo de recuperación simulado (Modo Offline)' }
+}

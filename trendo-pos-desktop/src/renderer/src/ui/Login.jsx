@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { onConnectivityChange } from '@/services/sync'
-import { loginWithEmail, registerWithEmail, VALID_ROLES } from '@/services/authLogin'
+import { loginWithEmail, registerWithEmail, VALID_ROLES, sendPasswordRecovery } from '@/services/authLogin'
 
 function WifiIcon({ className = 'w-4 h-4' }) {
   return (
@@ -57,7 +57,7 @@ function ConnectionBar() {
   )
 }
 
-export default function Login({ onAuthenticated }) {
+export default function Login({ onAuthenticated, initialInfo = '' }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -90,11 +90,25 @@ export default function Login({ onAuthenticated }) {
     setRole('Cajero')
   }
 
+  // If parent provides initial info (e.g., recovery link error), show it on mount
+  useEffect(() => {
+    if (initialInfo) setInfo(initialInfo)
+  }, [initialInfo])
+
   async function handleSubmit(e) {
     e.preventDefault()
     setLoading(true)
     setError('')
     try {
+      if (mode === 'recover') {
+        // Enviar correo de recuperación
+        const res = await sendPasswordRecovery(email)
+        setInfo(res?.message || 'Correo enviado. Revisa tu bandeja.')
+        // Volver a login después de notificar
+        switchMode('login')
+        return
+      }
+
       if (isRegister && password !== confirmPassword) {
         throw new Error('Las contraseñas no coinciden')
       }
@@ -134,6 +148,7 @@ export default function Login({ onAuthenticated }) {
           {isRegister ? 'Crea tu cuenta' : 'Inicia sesión'}
         </h2>
 
+        {mode !== 'recover' && (
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label className="block text-sm mb-1">Correo Electrónico</label>
@@ -275,15 +290,51 @@ export default function Login({ onAuthenticated }) {
             {loading ? (isRegister ? 'Creando cuenta…' : 'Iniciando…') : (isRegister ? 'Crear cuenta' : 'Iniciar sesión')}
           </button>
         </form>
+        )}
 
         <div className="mt-4 text-xs text-gray-600 dark:text-gray-400">
           Acceso exclusivo para personal autorizado ·{' '}
           {isRegister ? (
             <button className="text-blue-600 hover:underline" onClick={() => switchMode('login')}>Ya tengo cuenta</button>
           ) : (
-            <button className="text-blue-600 hover:underline" onClick={() => switchMode('register')}>Crear cuenta</button>
+            <>
+              <button className="text-blue-600 hover:underline mr-3" onClick={() => switchMode('register')}>Crear cuenta</button>
+              <button className="text-blue-600 hover:underline" onClick={() => switchMode('recover')}>Recuperar contraseña</button>
+            </>
           )}
         </div>
+
+        {/* Recuperación: si está en modo recover mostramos un pequeño form alterno */}
+        {mode === 'recover' && (
+          <div className="mt-4 w-full max-w-[92vw]">
+            <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">Introduce tu correo para recibir el enlace de recuperación.</div>
+            <form onSubmit={handleSubmit} className="flex gap-2">
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="flex-1 px-3 py-2 rounded border bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 outline-none focus:ring-2 focus:ring-blue-400"
+                placeholder="tu@correo.com"
+              />
+              <button
+                type="submit"
+                disabled={loading}
+                className="px-3 py-2 rounded bg-black text-white font-semibold hover:bg-gray-900 disabled:opacity-60"
+              >
+                {loading ? 'Enviando…' : 'Enviar'}
+              </button>
+            </form>
+            <div className="mt-2 text-xs text-gray-500">
+              <button
+                className="px-3 py-2 rounded bg-black text-white font-semibold hover:bg-gray-900"
+                onClick={() => switchMode('login')}
+              >
+                Volver
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Connection */}

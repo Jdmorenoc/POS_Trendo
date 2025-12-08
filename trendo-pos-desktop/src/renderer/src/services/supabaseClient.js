@@ -45,3 +45,18 @@ export const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY)
       db: { schema: 'public' } // Default schema
     })
   : createNoopSupabase()
+
+// Expose supabase on window in development for debugging convenience only
+if (typeof window !== 'undefined' && import.meta.env && import.meta.env.DEV) {
+  try {
+    // attach as non-enumerable to avoid accidental serialization
+    Object.defineProperty(window, '__supabase', {
+      value: supabase,
+      writable: false,
+      configurable: true
+    })
+    console.info('Debug: window.__supabase available (dev only)')
+  } catch (e) {
+    // ignore in environments that disallow defineProperty
+  }
+}
