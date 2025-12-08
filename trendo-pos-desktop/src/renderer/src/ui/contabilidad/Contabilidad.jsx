@@ -237,7 +237,7 @@ export default function Contabilidad({ onBack }) {
   return (
     <div className="h-full flex bg-white dark:bg-neutral-900 dark:text-gray-100">
       <main className="flex-1 p-6 bg-white dark:bg-neutral-900 dark:text-gray-100 flex flex-col">
-        <Header onBack={onBack} title="Contabilidad" syncAll={()=>{}} showBack={true} />
+        <Header onBack={onBack} title="Contabilidad" showBack={true} />
 
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-4">
           <div className="flex items-end gap-3">

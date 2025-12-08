@@ -1,15 +1,17 @@
 import { useEffect, useState, useMemo } from 'react'
 import { v4 as uuid } from 'uuid'
-import { listItems, upsertItem, markDeleted, findItemByCode, adjustStockByItem } from '@/services/db'
+import { listItems, upsertItem, markDeleted, findItemByCode, adjustStockByItem, removeItem } from '@/services/db'
 import { formatCOPInput, parseCOP, formatCOP } from '@/lib/currency'
 import { onConnectivityChange, syncAll, watchRealtime } from '@/services/sync'
+import { insertProductToCloud, deleteProductFromCloud } from '@/services/products'
 import { liveQuery } from 'dexie'
 import Sidebar from './Layout/Sidebar'
 import Header from './Layout/Header'
 import Footer from './Layout/Footer'
 
 // Longitud máxima permitida para el código ITEM (SKU)
-const MAX_SKU = 16
+const MAX_SKU = 15
+const SIZES = ['xs', 's', 'm', 'l', 'xl']
 
 function useLiveQuery(queryFn, deps = []) {
   const [data, setData] = useState([])
@@ -24,6 +26,10 @@ function useLiveQuery(queryFn, deps = []) {
 
 export default function Inventory({ onBack, onLogout, onNavigate }) {
   const items = useLiveQuery(listItems, [])
+  const visibleItems = useMemo(
+    () => items.filter(item => !item?.deleted || item.deleted === 0),
+    [items]
+  )
   const [showAddForm, setShowAddForm] = useState(false)
   const [newProduct, setNewProduct] = useState({
     item: '',
@@ -58,9 +64,13 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return items
-    return items.filter(i => (i.title || '').toLowerCase().includes(q) || (i.id || '').toLowerCase().includes(q) || (i.item || '').toLowerCase().includes(q))
-  }, [items, search])
+    if (!q) return visibleItems
+    return visibleItems.filter(i =>
+      (i.title || '').toLowerCase().includes(q) ||
+      (i.id || '').toLowerCase().includes(q) ||
+      (i.item || '').toLowerCase().includes(q)
+    )
+  }, [visibleItems, search])
 
   useEffect(() => {
     syncAll()
@@ -145,7 +155,6 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
   }
 
   async function handleSubmit() {
-    const id = uuid()
     setErrorAdd('')
     const code = (newProduct.item || '').trim()
     if (!code) {
@@ -156,32 +165,75 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
       setErrorAdd(`Máximo ${MAX_SKU} caracteres`)
       return
     }
-    // Validate duplicate ITEM code
     const existing = await findItemByCode(code)
     if (existing) {
       setErrorAdd('ITEM ya existe, elige otro código')
       return
     }
-    await upsertItem({ 
-      id, 
+
+    const parsedPrice = parseCOP(newProduct.price)
+    const normalizedStock = {}
+    SIZES.forEach((size) => {
+      normalizedStock[size] = Math.max(0, parseInt(newProduct[size], 10) || 0)
+    })
+    const totalQuantity = SIZES.reduce((sum, size) => sum + normalizedStock[size], 0)
+
+    const baseProduct = {
+      id: code,
       item: code,
       title: newProduct.title || 'Nuevo item',
-  price: parseCOP(newProduct.price),
-  xs: Math.max(0, parseInt(newProduct.xs) || 0),
-  s: Math.max(0, parseInt(newProduct.s) || 0),
-  m: Math.max(0, parseInt(newProduct.m) || 0),
-  l: Math.max(0, parseInt(newProduct.l) || 0),
-  xl: Math.max(0, parseInt(newProduct.xl) || 0),
+      price: parsedPrice,
       gender: newProduct.gender || 'Unisex',
       description: newProduct.description,
-      deleted: 0 
-    })
-    if (navigator.onLine) await syncAll()
-    setShowAddForm(false)
-  setNewProduct({ item: '', title: '', price: '', xs: '', s: '', m: '', l: '', xl: '', gender: 'Unisex', description: '' })
+      quantity: totalQuantity,
+      deleted: 0,
+      ...normalizedStock
+    }
+
+    try {
+      if (navigator.onLine) {
+        const nowIso = new Date().toISOString()
+        const cloudPayload = {
+          ...baseProduct,
+          deleted: false,
+          updated_at: nowIso
+        }
+        let saved = await insertProductToCloud(cloudPayload)
+        saved = saved || cloudPayload
+        await upsertItem({
+          ...baseProduct,
+          ...saved,
+          deleted: saved.deleted ? 1 : 0,
+          dirty: 0
+        })
+        await syncAll()
+      } else {
+        await upsertItem({ ...baseProduct, dirty: 1 })
+      }
+      setShowAddForm(false)
+      setNewProduct({
+        item: '',
+        title: '',
+        price: '',
+        xs: '',
+        s: '',
+        m: '',
+        l: '',
+        xl: '',
+        gender: 'Unisex',
+        description: ''
+      })
+    } catch (error) {
+      console.error('Error al guardar producto', error)
+      const message =
+        error?.message?.includes('duplicate') || error?.message?.includes('unique')
+          ? 'ITEM ya existe en la base de datos'
+          : 'No se pudo guardar el producto en la base de datos'
+      setErrorAdd(message)
+    }
   }
 
-  function openEdit(item) {
+  async function openEdit(item) {
     setEditing({
       id: item.id,
       title: item.title || '',
@@ -232,15 +284,42 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
     const label = item.title || item.item || (item.id ? item.id.slice(0,8) : '')
     const ok = window.confirm(`¿Eliminar "${label}"? Esta acción no se puede deshacer.`)
     if (!ok) return
-    await markDeleted(item.id)
-    if (navigator.onLine) await syncAll()
+
+    const productKey = item.item || item.id
+
+    if (!productKey) {
+      console.error('Intento de eliminar sin ID válido', item)
+      return
+    }
+
+    try {
+      if (navigator.onLine) {
+        const result = await deleteProductFromCloud(productKey)
+        if (result?.success === false) {
+          throw new Error(result.error || 'Supabase rechazó la eliminación')
+        }
+        await removeItem(item.id)
+        await syncAll()
+      } else {
+        await markDeleted(item.id)
+      }
+    } catch (error) {
+      console.error('Error al eliminar producto', error)
+      try {
+        await markDeleted(item.id)
+        window.alert('No se pudo eliminar el producto en la nube. Se eliminará cuando vuelva la conexión.')
+      } catch (markError) {
+        console.error('No se pudo marcar para eliminación local', markError)
+        window.alert('Error eliminando producto. Intenta nuevamente.')
+      }
+    }
   }
 
   return (
     <div className="h-full flex bg-white dark:bg-neutral-900 dark:text-gray-100">
       <Sidebar onNavigate={onNavigate} currentView="inventory" onLogout={onLogout} />
       <main className="flex-1 p-6 bg-white dark:bg-neutral-900 dark:text-gray-100 flex flex-col">
-        <Header onBack={onBack} syncAll={syncAll} title="Productos" showBack={true} />
+        <Header onBack={onBack} title="Productos" showBack={true} />
 
         <div className="flex flex-col gap-4 mb-6">
           <div className="flex items-center gap-3 max-w-3xl">
@@ -384,79 +463,96 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
           </div>
         )}
 
-        <section>
-          <div className="border border-gray-300 dark:border-neutral-700 rounded-lg overflow-hidden bg-white dark:bg-neutral-800">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 dark:bg-neutral-800 text-gray-700 dark:text-gray-200">
-                <tr className="text-left">
-                  <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-24">ITEM</th>
-                  <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700">Nombre</th>
-                  <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-24">Género</th>
-                  <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-20">XS</th>
-                  <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-20">S</th>
-                  <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-20">M</th>
-                  <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-20">L</th>
-                  <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-20">XL</th>
-                  <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-24">Total</th>
-                  <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-28">VALOR</th>
-                  <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-24">IVA (19%)</th>
-                  <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-32">Estado</th>
-                  <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-32">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-neutral-700">
-                {filtered.map(i => (
-                  <tr key={i.id} className="hover:bg-gray-50 dark:hover:bg-neutral-800">
-                    <td className="px-3 py-2 text-gray-600 dark:text-gray-300 text-xs font-mono">{i.item || i.id.slice(0,8)}</td>
-                    <td className="px-3 py-2">
-                      <div className="font-medium text-sm text-black dark:text-gray-100">{i.title}</div>
-                      {i.description && <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{i.description}</div>}
-                    </td>
-                    <td className="px-3 py-2 text-gray-700 dark:text-gray-200 text-xs">{i.gender || 'Unisex'}</td>
-                    {['xs','s','m','l','xl'].map(size => (
-                      <td key={size} className="px-3 py-2 text-gray-700 dark:text-gray-200">
-                        {i[size] || 0}
-                      </td>
-                    ))}
-                    <td className="px-3 py-2 text-gray-700 dark:text-gray-200 font-medium">{i.quantity || 0}</td>
-                    <td className="px-3 py-2 text-gray-700 dark:text-gray-200">{typeof i.price === 'number' ? formatCOP(i.price) : '—'}</td>
-                    <td className="px-3 py-2 text-gray-700 dark:text-gray-200">{typeof i.price === 'number' ? formatCOP(Math.round(i.price * 0.19)) : '—'}</td>
-                    <td className="px-3 py-2">
-                      {i.dirty ? (
-                        <span className="px-2 py-1 rounded text-xs bg-amber-100 text-amber-700">Pendiente</span>
-                      ) : (
-                        <span className="px-2 py-1 rounded text-xs bg-green-100 text-green-700">OK</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => openEdit(i)}
-                          title="Editar"
-                          aria-label="Editar"
-                          className="w-8 h-8 rounded border border-gray-300 dark:border-neutral-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-neutral-800 flex items-center justify-center"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                        </button>
-                        <button
-                          onClick={() => deleteItem(i)}
-                          title="Eliminar"
-                          aria-label="Eliminar"
-                          className="w-8 h-8 rounded border border-red-200 dark:border-red-400/40 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center justify-center"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={13} className="px-3 py-10 text-center text-gray-500 dark:text-gray-400">Sin productos</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+        <section className="flex-1 min-h-0">
+          <div className="border border-gray-300 dark:border-neutral-700 rounded-lg bg-white dark:bg-neutral-800 flex flex-col h-full">
+            <div className="overflow-x-auto">
+              <div className="max-h-[69vh] overflow-y-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50 dark:bg-neutral-800 text-gray-700 dark:text-gray-200 sticky top-0 z-10">
+                     <tr className="text-left">
+                       <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-24">ITEM</th>
+                       <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700">Nombre</th>
+                       <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-24">Género</th>
+                       <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-20">XS</th>
+                       <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-20">S</th>
+                       <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-20">M</th>
+                       <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-20">L</th>
+                       <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-20">XL</th>
+                       <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-24">Total</th>
+                       <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-28">VALOR</th>
+                       <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-24">IVA (19%)</th>
+                       <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-32">Estado</th>
+                       <th className="font-medium px-3 py-2 border-b border-gray-300 dark:border-neutral-700 w-32">Acciones</th>
+                     </tr>
+                   </thead>
+                   <tbody className="divide-y divide-gray-200 dark:divide-neutral-700">
+                     {filtered.map(item => {
+                      const normalizedSizes = SIZES.reduce((acc, size) => {
+                        const raw = item[size] ?? item[`stock_${size}`] ?? 0
+                        const parsed = Number.parseInt(raw, 10)
+                        acc[size] = Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+                        return acc
+                      }, {})
+                      const totalQuantity =
+                        Number.isFinite(item.quantity) && item.quantity >= 0
+                          ? item.quantity
+                          : SIZES.reduce((sum, size) => sum + normalizedSizes[size], 0)
+
+                      return (
+                        <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-neutral-800">
+                          <td className="px-3 py-2 text-gray-600 dark:text-gray-300 text-xs font-mono">{item.item || item.id.slice(0,8)}</td>
+                          <td className="px-3 py-2">
+                            <div className="font-medium text-sm text-black dark:text-gray-100">{item.title}</div>
+                            {item.description && <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{item.description}</div>}
+                          </td>
+                          <td className="px-3 py-2 text-gray-700 dark:text-gray-200 text-xs">{item.gender || 'Unisex'}</td>
+                          {SIZES.map(size => (
+                            <td key={size} className="px-3 py-2 text-gray-700 dark:text-gray-200">
+                              {normalizedSizes[size]}
+                            </td>
+                          ))}
+                          <td className="px-3 py-2 text-gray-700 dark:text-gray-200 font-medium">{totalQuantity}</td>
+                          <td className="px-3 py-2 text-gray-700 dark:text-gray-200">{typeof item.price === 'number' ? formatCOP(item.price) : '—'}</td>
+                          <td className="px-3 py-2 text-gray-700 dark:text-gray-200">{typeof item.price === 'number' ? formatCOP(Math.round(item.price * 0.19)) : '—'}</td>
+                          <td className="px-3 py-2">
+                            {item.dirty ? (
+                              <span className="px-2 py-1 rounded text-xs bg-amber-100 text-amber-700">Pendiente</span>
+                            ) : (
+                              <span className="px-2 py-1 rounded text-xs bg-green-100 text-green-700">OK</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => openEdit(item)}
+                                title="Editar"
+                                aria-label="Editar"
+                                className="w-8 h-8 rounded border border-gray-300 dark:border-neutral-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-neutral-800 flex items-center justify-center"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                              </button>
+                              <button
+                                onClick={() => deleteItem(item)}
+                                title="Eliminar"
+                                aria-label="Eliminar"
+                                className="w-8 h-8 rounded border border-red-200 dark:border-red-400/40 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center justify-center"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                     {filtered.length === 0 && (
+                       <tr>
+                         <td colSpan={13} className="px-3 py-10 text-center text-gray-500 dark:text-gray-400">Sin productos</td>
+                       </tr>
+                     )}
+                   </tbody>
+                 </table>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -506,7 +602,7 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
                       {['xs','s','m','l','xl'].map(sz => {
                         const qty = itemLookupResult[sz] || 0
                         return (
-                          <div key={sz} className="p-3 rounded-md border border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-700/40 text-center">
+                          <div key={sz} className="p-3 rounded-md border border-gray-200 dark:border-neutral-600 bg-gray-50 dark:bg-neutral-700/40 text-center">
                             <div className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-300">{sz}</div>
                             <div className="text-lg font-semibold text-black dark:text-white">{qty}</div>
                             {qty === 0 && <div className="text-[10px] text-red-500 mt-1">Sin stock</div>}
@@ -523,7 +619,7 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
         )}
 
         {showEditForm && editing && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center backdrop-blur-sm">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center backdrop-blur-sm z-50">
             <div className="bg-white dark:bg-neutral-800 rounded-lg p-6 w-96 shadow-xl border border-gray-200 dark:border-neutral-700">
               <h3 className="text-lg font-semibold mb-4 text-black dark:text-white">Editar Producto</h3>
               <div className="space-y-4">
@@ -553,7 +649,7 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
                   <select
                     value={editing.gender}
                     onChange={e => setEditing({ ...editing, gender: e.target.value })}
-                    className="mt-1 block w-full rounded-md border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-black dark:text-gray-100 text-sm"
+                    className="mt-1 block w-full rounded-md border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-black dark:text-gray-100 text-sm"
                   >
                     <option>Unisex</option>
                     <option>Hombre</option>

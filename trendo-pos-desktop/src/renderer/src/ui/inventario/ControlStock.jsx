@@ -1,5 +1,4 @@
 import React from 'react'
-import { syncAll } from '@/services/sync'
 import { liveQuery } from 'dexie'
 import { db } from '@/services/db'
 import Sidebar from './Layout/Sidebar'
@@ -109,7 +108,7 @@ export default function ControlStock({ onBack, onLogout, onNavigate }) {
     <div className="h-full flex bg-white dark:bg-neutral-900 dark:text-gray-100">
       <Sidebar onNavigate={onNavigate} currentView="controlStock" onLogout={onLogout} />
       <main className="flex-1 p-6 bg-white dark:bg-neutral-900 dark:text-gray-100 flex flex-col">
-        <Header onBack={onBack} syncAll={syncAll} title="Control de Stock" />
+        <Header onBack={onBack} title="Control de Stock" />
         
         <section>
           <div className="border border-[#a6a6a6] dark:border-neutral-700 rounded-lg p-6 bg-white dark:bg-neutral-800">

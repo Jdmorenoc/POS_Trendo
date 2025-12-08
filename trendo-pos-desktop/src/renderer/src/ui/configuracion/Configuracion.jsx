@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { syncAll } from '@/services/sync'
 import Header from '../inventario/Layout/Header'
 import Footer from '../inventario/Layout/Footer'
 
@@ -30,7 +29,7 @@ export default function Configuracion({ onBack }) {
   return (
     <div className="h-full bg-white text-gray-900 dark:bg-neutral-900 dark:text-gray-100">
       <main className="h-full p-6 bg-white text-gray-900 dark:bg-neutral-900 dark:text-gray-100 flex flex-col">
-        <Header onBack={onBack} syncAll={syncAll} title="Configuración" showBack={true} />
+        <Header onBack={onBack} title="Configuración" showBack={true} />
 
         <section className="border border-gray-300 dark:border-neutral-700 rounded-lg p-6 bg-white dark:bg-neutral-800">
           <h3 className="text-xl font-semibold mb-6">Preferencias</h3>

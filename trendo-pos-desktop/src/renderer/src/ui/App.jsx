@@ -10,6 +10,7 @@ import Cash from './caja/Cash'
 import Contabilidad from './contabilidad/Contabilidad'
 import Payment from './caja/Payment'
 import { supabase } from '@/services/supabaseClient'
+import { syncAll, onConnectivityChange } from '@/services/sync'
 
 export default function App() {
   const [user, setUser] = useState(null)
@@ -90,6 +91,35 @@ export default function App() {
     setUser(null)
     setView('login')
   }
+
+  useEffect(() => {
+    if (!user || typeof window === 'undefined') return
+
+    async function initialSync() {
+      try {
+        await syncAll()
+      } catch {
+        // ignoramos en modo silencioso; se reintentará en el intervalo
+      }
+    }
+
+    initialSync()
+
+    const intervalId = window.setInterval(() => {
+      if (navigator.onLine) {
+        syncAll()
+      }
+    }, 30_000)
+
+    const unsubscribe = typeof onConnectivityChange === 'function'
+      ? onConnectivityChange(() => { if (navigator.onLine) syncAll() })
+      : undefined
+
+    return () => {
+      window.clearInterval(intervalId)
+      if (typeof unsubscribe === 'function') unsubscribe()
+    }
+  }, [user])
 
   if (view === 'loading') return null
   if (!user || view === 'login') return <Login onAuthenticated={handleAuthenticated} />

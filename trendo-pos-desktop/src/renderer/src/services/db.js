@@ -134,7 +134,16 @@ export async function upsertItem(item) {
 
 export async function markDeleted(id) {
   const now = new Date().toISOString()
-  await db.table('items').put({ id, deleted: 1, dirty: 1, updated_at: now })
+  const table = db.table('items')
+  const updated = await table.update(id, { deleted: 1, dirty: 1, updated_at: now })
+  if (!updated) {
+    await table.put({ id, deleted: 1, dirty: 1, updated_at: now })
+  }
+}
+
+export async function removeItem(id) {
+  if (!id) return
+  await db.table('items').delete(id)
 }
 
 export async function bulkUpsert(items) {

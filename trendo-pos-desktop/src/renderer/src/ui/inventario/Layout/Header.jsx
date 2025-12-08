@@ -21,7 +21,7 @@ function OnlineBadge() {
   )
 }
 
-export default function Header({ onBack, syncAll, title = 'Inventario', showBack = true }) {
+export default function Header({ onBack, title = 'Inventario', showBack = true }) {
   return (
     <header className="flex items-center justify-between mb-4">
       <div className="flex items-center gap-3">
@@ -34,7 +34,6 @@ export default function Header({ onBack, syncAll, title = 'Inventario', showBack
       </div>
       <div className="flex items-center gap-3">
         <OnlineBadge />
-        <button onClick={() => syncAll()} className="px-3 py-2 bg-[#000000] text-white rounded hover:bg-gray-600 transition-colors">Sincronizar</button>
       </div>
     </header>
   )

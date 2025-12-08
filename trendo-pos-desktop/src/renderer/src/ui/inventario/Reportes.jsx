@@ -64,7 +64,7 @@ export default function Reportes({ onBack, onLogout, onNavigate }) {
     <div className="h-full flex bg-white dark:bg-neutral-900 dark:text-gray-100">
       <Sidebar onNavigate={onNavigate} currentView="reportes" onLogout={onLogout} />
       <main className="flex-1 p-6 bg-white dark:bg-neutral-900 dark:text-gray-100 flex flex-col">
-        <Header onBack={onBack} title="Reportes" syncAll={()=>{}} showBack={true} />
+        <Header onBack={onBack} title="Reportes" showBack={true} />
 
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-4">
           <div className="flex items-end gap-3">
