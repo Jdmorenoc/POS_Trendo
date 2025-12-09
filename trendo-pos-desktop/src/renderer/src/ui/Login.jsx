@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { onConnectivityChange } from '@/services/sync'
 import { loginWithEmail, registerWithEmail, VALID_ROLES, sendPasswordRecovery } from '@/services/authLogin'
+import { syncSingleAuthUserToEmployee } from '@/services/employees'
 
 function WifiIcon({ className = 'w-4 h-4' }) {
   return (
@@ -122,11 +123,25 @@ export default function Login({ onAuthenticated, initialInfo = '' }) {
             phone
           })
         : await loginWithEmail(email, password)
+      
       if (isRegister && result?.requiresLogin) {
         setInfo(result.message || 'Registro exitoso. Revisa tu correo para confirmar la cuenta.')
         switchMode('login')
         return
       }
+
+      // 🔄 Sincronizar usuario a tabla employee después del login exitoso
+      if (result) {
+        try {
+          console.log('🔄 Sincronizando usuario a tabla trendo.employee...')
+          await syncSingleAuthUserToEmployee()
+          console.log('✅ Usuario sincronizado exitosamente a tabla employee')
+        } catch (syncError) {
+          console.warn('⚠️ Advertencia: No se pudo sincronizar a tabla employee:', syncError.message)
+          // No fallar el login si falla la sincronización
+        }
+      }
+
       onAuthenticated?.(result)
     } catch (err) {
       setError(err?.message || 'Error al autenticar')

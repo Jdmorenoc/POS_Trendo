@@ -7,6 +7,13 @@ function ensureSupabase() {
   }
 }
 
+const NORMALIZED_GENDERS = {
+  hombre: 'Hombre',
+  masculino: 'Hombre',
+  mujer: 'Mujer',
+  femenino: 'Mujer'
+}
+
 /**
  * Guarda o actualiza un producto en el esquema 'trendo' de Supabase.
  */
@@ -45,12 +52,18 @@ export async function insertProductToCloud(productData) {
 
   console.log("📤 Subiendo a esquema 'trendo':", nombreDetectado);
 
+  const genderInput = (productData.gender || productData.gender_prod || productData.genero || '').trim().toLowerCase()
+  const generoDetectado = NORMALIZED_GENDERS[genderInput]
+  if (!generoDetectado) {
+    return { success: false, error: 'Selecciona género válido (Hombre / Mujer).' }
+  }
+
   const payload = {
     product_id: idDetectado, 
     product_name: nombreDetectado,
     price: precioDetectado,
-    image_url: productData.image_url || productData.imagen || null,
     description: productData.descripcion || productData.description || null,
+    gender_prod: generoDetectado,
     stock_xs: parseInt(productData.tallas?.xs || productData.stock_xs || 0, 10),
     stock_s:  parseInt(productData.tallas?.s  || productData.stock_s  || 0, 10),
     stock_m:  parseInt(productData.tallas?.m  || productData.stock_m  || 0, 10),
@@ -83,11 +96,11 @@ export async function insertProductToCloud(productData) {
 
     const dataAdaptada = {
       ...source,
-      
-      // Identificadores
       id: source.product_id || payload.product_id,
       code: source.product_id || payload.product_id,
       nombre: source.product_name || payload.product_name,
+      gender: source.gender_prod ?? generoDetectado,
+      gender_prod: source.gender_prod ?? generoDetectado,
       
       // FORMATO PLANO (BD - stock_x)
       stock_xs: source.stock_xs ?? payload.stock_xs ?? 0,
@@ -187,7 +200,7 @@ export async function getProductsFromCloud() {
       product_name,
       description,
       price,
-      image_url,
+      gender_prod,
       stock_xs,
       stock_s,
       stock_m,
@@ -197,40 +210,45 @@ export async function getProductsFromCloud() {
 
   if (error) throw error
   
-  const productosAdaptados = data.map(p => ({
-    ...p,
-    id: p.product_id,
-    code: p.product_id,
-    nombre: p.product_name,
-    
-    // Formato BD
-    stock_xs: p.stock_xs || 0,
-    stock_s: p.stock_s || 0,
-    stock_m: p.stock_m || 0,
-    stock_l: p.stock_l || 0,
-    stock_xl: p.stock_xl || 0,
+  const productosAdaptados = data.map(p => {
+    const normalizedGender = NORMALIZED_GENDERS[(p.gender_prod || '').trim().toLowerCase()] || ''
+    return {
+      ...p,
+      id: p.product_id,
+      code: p.product_id,
+      nombre: p.product_name,
+      gender: normalizedGender,
+      gender_prod: normalizedGender,
+      
+      // Formato BD
+      stock_xs: p.stock_xs || 0,
+      stock_s: p.stock_s || 0,
+      stock_m: p.stock_m || 0,
+      stock_l: p.stock_l || 0,
+      stock_xl: p.stock_xl || 0,
 
-    // Formato Corto
-    xs: p.stock_xs || 0,
-    s: p.stock_s || 0,
-    m: p.stock_m || 0,
-    l: p.stock_l || 0,
-    xl: p.stock_xl || 0,
-
-    // Objeto Tallas
-    tallas: {
+      // Formato Corto
       xs: p.stock_xs || 0,
       s: p.stock_s || 0,
       m: p.stock_m || 0,
       l: p.stock_l || 0,
       xl: p.stock_xl || 0,
-      stock_xs: p.stock_xs || 0,
-      stock_s: p.stock_s || 0,
-      stock_m: p.stock_m || 0,
-      stock_l: p.stock_l || 0,
-      stock_xl: p.stock_xl || 0
+
+      // Objeto Tallas
+      tallas: {
+        xs: p.stock_xs || 0,
+        s: p.stock_s || 0,
+        m: p.stock_m || 0,
+        l: p.stock_l || 0,
+        xl: p.stock_xl || 0,
+        stock_xs: p.stock_xs || 0,
+        stock_s: p.stock_s || 0,
+        stock_m: p.stock_m || 0,
+        stock_l: p.stock_l || 0,
+        stock_xl: p.stock_xl || 0
+      }
     }
-  }));
+  })
 
   return productosAdaptados
 }

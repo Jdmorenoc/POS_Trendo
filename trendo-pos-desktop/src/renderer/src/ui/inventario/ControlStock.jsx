@@ -191,7 +191,6 @@ export default function ControlStock({ onBack, onLogout, onNavigate }) {
                         <option>Todos</option>
                         <option>Hombre</option>
                         <option>Mujer</option>
-                        <option>Unisex</option>
                       </select>
                     </div>
                   </div>

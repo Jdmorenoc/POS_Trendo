@@ -97,11 +97,11 @@ export default function App() {
             setUser(null)
             setView('login')
           }
-          // subscribe to auth changes
+          // subscribe to auth changes - SOLO para logout o cambios de sesión real
           supabase.auth.onAuthStateChange((_event, session) => {
             if (session?.user) {
               setUser(session.user)
-              setView('menu')
+              // NO cambiar la vista aquí - mantener donde estaba
             } else {
               // Clear any local session and force login view
               try { if (typeof window !== 'undefined') window.localStorage.removeItem('mock_user') } catch {}
@@ -126,39 +126,8 @@ export default function App() {
     boot()
   }, [])
 
-  // Re-check session when window regains focus or becomes visible
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    let mounted = true
-    const checkSession = async () => {
-      try {
-        if (!supabase?.auth?.getSession) return
-        const { data } = await supabase.auth.getSession()
-        if (!mounted) return
-        if (data?.session?.user) {
-          setUser(data.session.user)
-          // keep menu if already on menu
-          if (view !== 'reset') setView('menu')
-        } else {
-          try { window.localStorage.removeItem('mock_user') } catch {}
-          setUser(null)
-          setView('login')
-        }
-      } catch (e) {
-        // ignore
-      }
-    }
-
-    const onFocus = () => { checkSession() }
-    const onVisibility = () => { if (document.visibilityState === 'visible') checkSession() }
-    window.addEventListener('focus', onFocus)
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      mounted = false
-      window.removeEventListener('focus', onFocus)
-      document.removeEventListener('visibilitychange', onVisibility)
-    }
-  }, [view])
+  // REMOVIDO: useEffect que reseteaba la vista al cambiar de ventana
+  // Ahora solo verificamos sesión en boot() y onAuthStateChange()
 
   function handleAuthenticated(u) {
     if (!supabase?.auth && typeof window !== 'undefined') {
@@ -203,6 +172,29 @@ export default function App() {
       if (typeof unsubscribe === 'function') unsubscribe()
     }
   }, [user])
+
+  // Verifica que el useEffect esté así (SIN setView('menu')):
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession()
+        if (error) throw error
+        
+        if (session?.user) {
+          // ✅ Solo actualiza usuario, NO cambia la vista
+          setUser(session.user)
+        } else {
+          setView('login')
+        }
+      } catch (err) {
+        console.error('❌ Error verificando sesión:', err)
+        setView('login')
+      }
+    }
+
+    // Solo ejecuta una vez al cargar la app
+    checkSession()
+  }, []) // ⬅️ Array vacío - NO incluye [view]
 
   if (view === 'loading') return null
   if (view === 'reset') return <ResetPassword onDone={() => setView('login')} />

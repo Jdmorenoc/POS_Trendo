@@ -68,22 +68,24 @@ export async function loginWithEmail(email, password) {
 
     try {
         // Consultamos la tabla real en tu esquema personalizado
-        const { data: dbData } = await supabase
+        const { data: dbDataArray, error: dbError } = await supabase
             .schema('trendo') // <--- IMPORTANTE: Esquema trendo
             .from('employee')
-            .select('Type_employee, first_name, last_name, second_name, second_last_name')
-            .eq('user_id', rawUser.id)
-            .single()
+            .select('type_employee, first_name, last_name, second_name, second_last_name')
+            .eq('auth_user_id', rawUser.id)
         
-        if (dbData) {
-            employeeData = dbData
-            typeEmployee = normalizeTypeEmployee(dbData.Type_employee)
+        if (dbError) {
+            console.warn("Error consultando tabla employee:", dbError)
+        } else if (dbDataArray && dbDataArray.length > 0) {
+            employeeData = dbDataArray[0]
+            typeEmployee = normalizeTypeEmployee(dbDataArray[0].type_employee)
+            console.log('✓ Datos de empleado obtenidos:', employeeData)
+        } else {
+            console.log('ℹ️ No hay registro en tabla employee para este usuario (se creará al sincronizar)')
         }
     } catch (err) {
         console.warn("No se pudo sincronizar perfil de empleado:", err)
-    }
-
-    // C. Construir objeto de usuario unificado
+    }    // C. Construir objeto de usuario unificado
     const user = {
       ...(rawUser || {}),
       email: rawUser?.email || trimmedEmail,

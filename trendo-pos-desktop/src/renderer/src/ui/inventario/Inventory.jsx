@@ -236,8 +236,9 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
   async function openEdit(item) {
     setEditing({
       id: item.id,
+      originalItem: item.item || item.id || '',
       title: item.title || '',
-  price: item.price ? formatCOPInput(item.price) : '',
+      price: typeof item.price === 'number' ? formatCOPInput(item.price) : '',
       xs: item.xs || 0,
       s: item.s || 0,
       m: item.m || 0,
@@ -253,8 +254,8 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
   async function handleEditSubmit() {
     if (!editing) return
     setErrorEdit('')
-    const { id, ...rest } = editing
-    const code = (rest.item || '').trim()
+    const { id, originalItem, item: editedItem, price, xs, s, m, l, xl, ...rest } = editing
+    const code = (editedItem || '').trim()
     if (!code) {
       setErrorEdit('El ITEM es requerido')
       return
@@ -268,14 +269,75 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
       setErrorEdit('ITEM ya existe, elige otro código')
       return
     }
-    const sizes = ['xs','s','m','l','xl']
-    const cleaned = { ...rest }
-    sizes.forEach(sz => { cleaned[sz] = Math.max(0, parseInt(rest[sz]) || 0) })
-  const patch = { ...cleaned, item: code, gender: cleaned.gender || 'Unisex', price: parseCOP(cleaned.price) }
-    await upsertItem({ id, ...patch })
-    if (navigator.onLine) await syncAll()
-    setShowEditForm(false)
-    setEditing(null)
+
+    const toStock = value => Math.max(0, parseInt(value, 10) || 0)
+    const normalizedStock = {
+      xs: toStock(xs),
+      s: toStock(s),
+      m: toStock(m),
+      l: toStock(l),
+      xl: toStock(xl)
+    }
+    const totalQuantity = SIZES.reduce((sum, size) => sum + normalizedStock[size], 0)
+    const priceNumber = parseCOP(price)
+    if (!Number.isFinite(priceNumber) || priceNumber <= 0) {
+      setErrorEdit('Precio inválido')
+      return
+    }
+
+    const localRecord = {
+      id: code,
+      item: code,
+      title: rest.title || '',
+      description: rest.description || '',
+      gender: rest.gender || 'Unisex',
+      price: priceNumber,
+      quantity: totalQuantity,
+      deleted: 0,
+      ...normalizedStock
+    }
+
+    try {
+      if (navigator.onLine) {
+        const nowIso = new Date().toISOString()
+        const cloudPayload = {
+          ...localRecord,
+          product_name: localRecord.title,
+          nombre: localRecord.title,
+          stock_xs: localRecord.xs,
+          stock_s: localRecord.s,
+          stock_m: localRecord.m,
+          stock_l: localRecord.l,
+          stock_xl: localRecord.xl,
+          updated_at: nowIso,
+          deleted: false
+        }
+        const cloudResult = await insertProductToCloud(cloudPayload)
+        if (cloudResult?.success === false) {
+          throw new Error(cloudResult.error || 'Supabase rechazó la actualización')
+        }
+        await upsertItem({ ...localRecord, dirty: 0 })
+      } else {
+        await upsertItem({ ...localRecord, dirty: 1 })
+      }
+
+      const originalCloudKey = originalItem || id
+      if (originalCloudKey && originalCloudKey !== code) {
+        if (navigator.onLine) {
+          await deleteProductFromCloud(originalCloudKey).catch(err => console.warn('No se pudo eliminar en nube', err))
+          await removeItem(id).catch(err => console.warn('No se pudo eliminar local antiguo', err))
+        } else {
+          await markDeleted(id)
+        }
+      }
+
+      if (navigator.onLine) await syncAll()
+      setShowEditForm(false)
+      setEditing(null)
+    } catch (error) {
+      console.error('Error al actualizar producto', error)
+      setErrorEdit(error?.message || 'No se pudo actualizar el producto')
+    }
   }
 
   
@@ -505,7 +567,9 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
                             <div className="font-medium text-sm text-black dark:text-gray-100">{item.title}</div>
                             {item.description && <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{item.description}</div>}
                           </td>
-                          <td className="px-3 py-2 text-gray-700 dark:text-gray-200 text-xs">{item.gender || 'Unisex'}</td>
+                          <td className="px-2 py-1 text-xs text-gray-600 dark:text-gray-300">
+                                 {(item.gender_prod || item.gender || '').trim()}
+                          </td>
                           {SIZES.map(size => (
                             <td key={size} className="px-3 py-2 text-gray-700 dark:text-gray-200">
                               {normalizedSizes[size]}
@@ -651,7 +715,6 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
                     onChange={e => setEditing({ ...editing, gender: e.target.value })}
                     className="mt-1 block w-full rounded-md border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-black dark:text-gray-100 text-sm"
                   >
-                    <option>Unisex</option>
                     <option>Hombre</option>
                     <option>Mujer</option>
                   </select>

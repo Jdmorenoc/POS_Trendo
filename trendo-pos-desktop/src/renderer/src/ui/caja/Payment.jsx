@@ -1,12 +1,15 @@
 import { useEffect, useState, useMemo } from 'react'
 import { getMeta, setMeta, findItemByCode, adjustStockByItem, addSale, getActiveShift } from '@/services/db'
 import { formatCOP, formatCOPInput, parseCOP } from '@/lib/currency'
+import { pushSalesToCloud } from '@/services/sync'
+import { supabase } from '@/services/supabaseClient'
 
 // Pantalla de cobro final: métodos de pago, desglose y generación de factura
 export default function Payment({ onBack, onNavigate }) {
   const [pending, setPending] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [currentUser, setCurrentUser] = useState(null)
 
   // Métodos de pago (multi-entrada)
   const [efectivo, setEfectivo] = useState('')
@@ -17,6 +20,18 @@ export default function Payment({ onBack, onNavigate }) {
   const [generating, setGenerating] = useState(false)
 
   useEffect(() => {
+    // Obtener usuario actual
+    try {
+      const mockUser = JSON.parse(window.localStorage?.getItem('mock_user') || 'null')
+      if (mockUser && mockUser.documentId) {
+        setCurrentUser(mockUser)
+        console.log('✓ Usuario actual:', mockUser.documentId)
+      }
+    } catch (e) {
+      console.warn('No se pudo obtener usuario del localStorage:', e)
+    }
+    
+    // Cargar venta pendiente
     async function load() {
       try {
         const p = await getMeta('pending_sale', null)
@@ -65,8 +80,70 @@ export default function Payment({ onBack, onNavigate }) {
   async function handleGenerarFactura() {
     if (!pending) return
     if (restante > 0) return
+    
     setGenerating(true)
+    setError('')
+    
     try {
+      // Obtener documento del empleado actual desde la cuenta autenticada
+      let employeeDoc = ''
+      
+      try {
+        // 1. Obtener del usuario autenticado
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          console.log('👤 Usuario autenticado:', user.email)
+          
+          // Buscar documento en múltiples lugares del user_metadata
+          if (user.user_metadata?.documentId) {
+            employeeDoc = String(user.user_metadata.documentId).trim()
+            console.log('📌 Documento encontrado en documentId:', employeeDoc)
+          } else if (user.user_metadata?.document) {
+            employeeDoc = String(user.user_metadata.document).trim()
+            console.log('📌 Documento encontrado en document:', employeeDoc)
+          } else if (user.user_metadata?.identification_number) {
+            employeeDoc = String(user.user_metadata.identification_number).trim()
+            console.log('📌 Documento encontrado en identification_number:', employeeDoc)
+          } else {
+            // Si no hay documento en metadata, intenta obtener de la tabla employee
+            console.log('ℹ️ No hay documento en user_metadata, buscando en tabla employee...')
+            const { data: empData } = await supabase
+              .schema('trendo')
+              .from('employee')
+              .select('em_document')
+              .eq('auth_user_id', user.id)
+              .maybeSingle()
+            
+            if (empData?.em_document) {
+              employeeDoc = String(empData.em_document).trim()
+              console.log('📌 Documento obtenido de tabla employee:', employeeDoc)
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Error obteniendo documento de Supabase:', e.message)
+      }
+      
+      // Fallback: intentar desde localStorage
+      if (!employeeDoc) {
+        try {
+          const mockUser = JSON.parse(window.localStorage?.getItem('mock_user') || 'null')
+          if (mockUser?.documentId) {
+            employeeDoc = mockUser.documentId
+            console.log('📌 Documento desde localStorage:', employeeDoc)
+          }
+        } catch (e2) {
+          console.warn('No se pudo obtener documento del localStorage:', e2)
+        }
+      }
+      
+      // Validar que tenemos documento
+      if (!employeeDoc) {
+        console.warn('⚠️ No se encontró documento de empleado')
+      } else {
+        console.log('✅ Documento de empleado confirmado:', employeeDoc.substring(0, 5) + '***')
+      }
+      
       // Validar stock justo antes (por concurrencia)
       for (const l of pending.cart) {
         const item = await findItemByCode(l.code)
@@ -80,19 +157,35 @@ export default function Payment({ onBack, onNavigate }) {
       // Registrar venta
       const shift = await getActiveShift()
       if (!shift) throw new Error('No hay turno activo')
-      await addSale({
+      
+      const saleRecord = await addSale({
         total: totalAPagar,
         items: pending.items,
         method: metodoPrincipal(),
         customerId: pending.customerId || '',
         tipoComprobante: pending.invoiceType || '',
+        employeeDocument: employeeDoc
       })
+      console.log('✓ Venta registrada localmente con documento empleado:', employeeDoc)
+      
+      // Sincronizar venta a Supabase
+      try {
+        console.log('🔄 Sincronizando venta a Supabase con employee_document:', employeeDoc)
+        await pushSalesToCloud()
+        console.log('✓ Venta sincronizada correctamente a Supabase')
+      } catch (syncError) {
+        console.error('✗ Error sincronizando venta:', syncError.message)
+        console.warn('La venta se guardó localmente, se sincronizará más tarde')
+      }
+      
       await setMeta('pending_sale', null)
+      console.log('✓ Factura generada exitosamente')
+      
       // Navegar a caja limpia
       if (typeof onNavigate === 'function') onNavigate('cash')
     } catch (e) {
+      console.error('Error al generar factura:', e)
       setError(e.message || 'Error al generar factura')
-    } finally {
       setGenerating(false)
     }
   }
@@ -123,19 +216,19 @@ export default function Payment({ onBack, onNavigate }) {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Efectivo</label>
-                  <input value={efectivo} onChange={e=>setEfectivo(formatCOPInput(e.target.value))} inputMode="numeric" className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm" placeholder="0" />
+                  <input type="text" value={efectivo} onChange={e=>setEfectivo(formatCOPInput(e.target.value))} inputMode="numeric" className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0" />
                 </div>
                 <div>
                   <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Transferencia</label>
-                  <input value={transferencia} onChange={e=>setTransferencia(formatCOPInput(e.target.value))} inputMode="numeric" className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm" placeholder="0" />
+                  <input type="text" value={transferencia} onChange={e=>setTransferencia(formatCOPInput(e.target.value))} inputMode="numeric" className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0" />
                 </div>
                 <div>
                   <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Tarjeta Débito</label>
-                  <input value={tarjetaDebito} onChange={e=>setTarjetaDebito(formatCOPInput(e.target.value))} inputMode="numeric" className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm" placeholder="0" />
+                  <input type="text" value={tarjetaDebito} onChange={e=>setTarjetaDebito(formatCOPInput(e.target.value))} inputMode="numeric" className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0" />
                 </div>
                 <div>
                   <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Tarjeta Crédito</label>
-                  <input value={tarjetaCredito} onChange={e=>setTarjetaCredito(formatCOPInput(e.target.value))} inputMode="numeric" className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm" placeholder="0" />
+                  <input type="text" value={tarjetaCredito} onChange={e=>setTarjetaCredito(formatCOPInput(e.target.value))} inputMode="numeric" className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0" />
                 </div>
               </div>
             </div>
@@ -152,7 +245,10 @@ export default function Payment({ onBack, onNavigate }) {
                     value={descuentoPct}
                     onChange={e=> {
                       const v = e.target.value.replace(/[^0-9.,]/g,'')
-                      setDescuentoPct(v)
+                      const num = parseFloat(v.replace(/,/g,'').replace('%',''))
+                      if (!v || (isFinite(num) && num >= 0 && num <= 100)) {
+                        setDescuentoPct(v)
+                      }
                     }}
                     inputMode="numeric"
                     className="w-24 px-2 py-1 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-xs text-right"
