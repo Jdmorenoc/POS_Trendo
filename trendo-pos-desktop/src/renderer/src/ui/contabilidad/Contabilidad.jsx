@@ -4,8 +4,9 @@ import { formatCOP } from '@/lib/currency'
 import { liveQuery } from 'dexie'
 import Header from '../inventario/Layout/Header'
 import Footer from '../inventario/Layout/Footer'
-import { db, listShifts } from '@/services/db'
+import { db, listShifts, listReturns } from '@/services/db'
 import * as XLSX from 'xlsx'
+import { PieChart, Pie, Cell, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 function useLiveSales() {
   const [data, setData] = React.useState([])
@@ -29,9 +30,21 @@ function useLiveShifts() {
   return data
 }
 
+function useLiveReturns() {
+  const [data, setData] = React.useState([])
+  React.useEffect(() => {
+    const sub = liveQuery(() => listReturns()).subscribe({
+      next: v => setData(v)
+    })
+    return () => sub.unsubscribe()
+  }, [])
+  return data
+}
+
 export default function Contabilidad({ onBack }) {
   const sales = useLiveSales()
   const shifts = useLiveShifts()
+  const returns = useLiveReturns()
   const [day, setDay] = useState(() => new Date().toISOString().slice(0,10))
   const [selectedShiftId, setSelectedShiftId] = useState(null)
   const [showExportModal, setShowExportModal] = useState(false)
@@ -91,6 +104,46 @@ export default function Contabilidad({ onBack }) {
       setExportShiftId('')
     }
   }, [dayShifts, selectedShiftId])
+
+  // Datos para gráficos
+  const paymentMethodsData = useMemo(() => {
+    return [
+      { name: 'Efectivo', value: selected.efectivo, color: '#3b82f6' },
+      { name: 'Transferencia', value: selected.transferencia, color: '#f59e0b' },
+      { name: 'Tarjeta', value: selected.tarjeta || 0, color: '#ef4444' }
+    ].filter(item => item.value > 0)
+  }, [selected])
+
+  const shiftSalesData = useMemo(() => {
+    return dayShifts.map(sh => {
+      const agg = perShiftAggregates[sh.id] || { total: 0, items: 0 }
+      return {
+        name: new Date(sh.opened_at).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }),
+        ventas: agg.total,
+        prendas: agg.items
+      }
+    })
+  }, [dayShifts, perShiftAggregates])
+
+  const hourlyTrendData = useMemo(() => {
+    const hourlyMap = {}
+    for (const s of sales) {
+      const dkey = (s.created_at || '').slice(0, 10)
+      if (dkey !== day) continue
+      const hour = new Date(s.created_at).getHours()
+      const hourKey = `${hour}:00`
+      if (!hourlyMap[hourKey]) {
+        hourlyMap[hourKey] = { hour: hourKey, total: 0, cantidad: 0 }
+      }
+      hourlyMap[hourKey].total += s.total || 0
+      hourlyMap[hourKey].cantidad += s.items || 0
+    }
+    return Object.values(hourlyMap).sort((a, b) => {
+      const hourA = parseInt(a.hour.split(':')[0])
+      const hourB = parseInt(b.hour.split(':')[0])
+      return hourA - hourB
+    })
+  }, [sales, day])
 
   function exportShiftAsCSV(agg) {
     const headers = ['Turno','Fecha','Apertura','Inicial','Cierre','Final','Prendas','Total Ventas','Efectivo','Transferencia','Tarjeta','Dif. Caja','Moneda']
@@ -275,7 +328,92 @@ export default function Contabilidad({ onBack }) {
           </div>
         </div>
 
-        <section className="border border-gray-300 dark:border-neutral-700 rounded-lg overflow-hidden bg-white dark:bg-neutral-800">
+        {/* Sección de Gráficos */}
+        <section className="mb-8">
+          <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Análisis Visual</h3>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Gráfico de Métodos de Pago */}
+            {paymentMethodsData.length > 0 && (
+              <div className="bg-white dark:bg-neutral-800 rounded-lg p-6 border border-gray-200 dark:border-neutral-700 shadow-md">
+                <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Métodos de Pago</h4>
+                <ResponsiveContainer width="100%" height={300}>
+                  <PieChart>
+                    <Pie
+                      data={paymentMethodsData}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={(entry) => `${entry.name}: ${formatCOP(entry.value)}`}
+                      outerRadius={80}
+                      fill="#8884d8"
+                      dataKey="value"
+                    >
+                      {paymentMethodsData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      formatter={(value) => formatCOP(value)}
+                      contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px', color: '#fff' }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Gráfico de Ventas por Turno */}
+            {shiftSalesData.length > 0 && (
+              <div className="bg-white dark:bg-neutral-800 rounded-lg p-6 border border-gray-200 dark:border-neutral-700 shadow-md">
+                <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Ventas por Turno</h4>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={shiftSalesData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                    <XAxis dataKey="name" stroke="#9ca3af" />
+                    <YAxis stroke="#9ca3af" />
+                    <Tooltip 
+                      formatter={(value) => formatCOP(value)}
+                      contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px', color: '#fff' }}
+                    />
+                    <Legend wrapperStyle={{ color: '#9ca3af' }} />
+                    <Bar dataKey="ventas" fill="#3b82f6" name="Ventas (COP)" radius={[8, 8, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Gráfico de Tendencia Horaria */}
+            {hourlyTrendData.length > 0 && (
+              <div className="bg-white dark:bg-neutral-800 rounded-lg p-6 border border-gray-200 dark:border-neutral-700 shadow-md lg:col-span-2">
+                <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Tendencia por Hora</h4>
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={hourlyTrendData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                    <XAxis dataKey="hour" stroke="#9ca3af" />
+                    <YAxis stroke="#9ca3af" />
+                    <Tooltip 
+                      formatter={(value) => formatCOP(value)}
+                      contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px', color: '#fff' }}
+                    />
+                    <Legend wrapperStyle={{ color: '#9ca3af' }} />
+                    <Line 
+                      type="monotone" 
+                      dataKey="total" 
+                      stroke="#10b981" 
+                      name="Ventas (COP)" 
+                      strokeWidth={3}
+                      dot={{ fill: '#10b981', r: 5 }}
+                      activeDot={{ r: 7 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Tabla de Resumen Diario */}
+        <section className="mb-8 bg-white dark:bg-neutral-800 rounded-lg p-6 border border-gray-200 dark:border-neutral-700 shadow-md">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Resumen del día {day}</h3>
           <table className="w-full text-sm">
             <thead className="bg-gray-50 dark:bg-neutral-800 text-black dark:text-gray-200">
               <tr className="text-left">
@@ -371,6 +509,69 @@ export default function Contabilidad({ onBack }) {
             <div className="mt-3 text-right">
               <button onClick={()=>setSelectedShiftId(null)} className="text-xs px-3 py-1 rounded border border-gray-300 dark:border-neutral-600 hover:bg-gray-50 dark:hover:bg-neutral-700">Cerrar detalle</button>
             </div>
+
+            {/* Sección de Devoluciones del turno seleccionado */}
+            {(() => {
+              const shiftReturns = returns.filter(r => r.shiftId === selectedShiftId)
+              const totalReturns = shiftReturns.reduce((acc, r) => acc + (r.refund_amount || 0), 0)
+              const itemsReturns = shiftReturns.reduce((acc, r) => acc + (r.quantity || 0), 0)
+              
+              return (
+                <div className="mt-6 pt-6 border-t border-gray-300 dark:border-neutral-700">
+                  <h6 className="text-sm font-semibold mb-3 text-black dark:text-white">Devoluciones del turno</h6>
+                  
+                  {shiftReturns.length > 0 ? (
+                    <>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs mb-4">
+                        <div className="border border-gray-300 dark:border-neutral-700 rounded p-2 bg-gray-50 dark:bg-neutral-800">
+                          <div className="text-gray-500 dark:text-gray-400 text-xs">Total Devoluciones</div>
+                          <div className="font-semibold text-black dark:text-white">{formatCOP(totalReturns)}</div>
+                        </div>
+                        <div className="border border-gray-300 dark:border-neutral-700 rounded p-2 bg-gray-50 dark:bg-neutral-800">
+                          <div className="text-gray-500 dark:text-gray-400 text-xs">Cantidad de prendas</div>
+                          <div className="font-semibold text-black dark:text-white">{itemsReturns}</div>
+                        </div>
+                        <div className="border border-gray-300 dark:border-neutral-700 rounded p-2 bg-gray-50 dark:bg-neutral-800">
+                          <div className="text-gray-500 dark:text-gray-400 text-xs">Total de devoluciones</div>
+                          <div className="font-semibold text-black dark:text-white">{shiftReturns.length}</div>
+                        </div>
+                      </div>
+
+                      <div className="overflow-auto border border-gray-300 dark:border-neutral-700 rounded-lg">
+                        <table className="w-full text-xs">
+                          <thead className="bg-gray-50 dark:bg-neutral-800 text-black dark:text-gray-200">
+                            <tr className="text-left">
+                              <th className="px-2 py-2 border-b border-gray-300 dark:border-neutral-700">Hora</th>
+                              <th className="px-2 py-2 border-b border-gray-300 dark:border-neutral-700">Prenda</th>
+                              <th className="px-2 py-2 border-b border-gray-300 dark:border-neutral-700">Talla</th>
+                              <th className="px-2 py-2 border-b border-gray-300 dark:border-neutral-700">Cantidad</th>
+                              <th className="px-2 py-2 border-b border-gray-300 dark:border-neutral-700">Motivo</th>
+                              <th className="px-2 py-2 border-b border-gray-300 dark:border-neutral-700">Reembolso</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200 dark:divide-neutral-700">
+                            {shiftReturns.map(ret => (
+                              <tr key={ret.id} className="hover:bg-gray-50 dark:hover:bg-neutral-700/60">
+                                <td className="px-2 py-1 font-mono text-xs">{new Date(ret.created_at || new Date()).toLocaleTimeString()}</td>
+                                <td className="px-2 py-1">{ret.product_name || 'N/A'}</td>
+                                <td className="px-2 py-1 text-center">{ret.size || '—'}</td>
+                                <td className="px-2 py-1 text-center">{ret.quantity || 0}</td>
+                                <td className="px-2 py-1 text-xs">{ret.reason || '—'}</td>
+                                <td className="px-2 py-1 font-medium text-red-600 dark:text-red-400">{formatCOP(ret.refund_amount || 0)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm border border-gray-300 dark:border-neutral-700 rounded">
+                      Sin devoluciones registradas en este turno
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
           </div>
         )}
 

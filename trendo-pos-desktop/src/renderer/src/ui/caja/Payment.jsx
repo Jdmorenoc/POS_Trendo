@@ -45,8 +45,10 @@ export default function Payment({ onBack, onNavigate }) {
     load()
   }, [])
 
-  // Precios incluyen IVA (19%). Base sin IVA (total bruto solicitado) = precio * 0.81
-  const baseOriginal = useMemo(() => (pending?.cart||[]).reduce((acc,l)=> acc + (Number(l.price)||0) * 0.81 * (parseInt(l.qty)||0), 0), [pending])
+  // Cálculo de totales - El precio mostrado en el carrito es el total a cobrar
+  // Por defecto NO hay descuento. Los descuentos son opcionales.
+  const subtotal = useMemo(() => (pending?.cart||[]).reduce((acc, l) => acc + (Number(l.price)||0) * (parseInt(l.qty)||0), 0), [pending])
+  
   const descuentoPercent = useMemo(() => {
     const raw = descuentoPct.trim()
     if (!raw) return 0
@@ -54,10 +56,15 @@ export default function Payment({ onBack, onNavigate }) {
     if (!isFinite(num) || num < 0) return 0
     return Math.min(num, 100)
   }, [descuentoPct])
-  const descuentoVal = useMemo(() => baseOriginal * (descuentoPercent / 100), [baseOriginal, descuentoPercent])
-  const baseTrasDescuento = useMemo(() => Math.max(0, baseOriginal - descuentoVal), [baseOriginal, descuentoVal])
-  const ivaTrasDescuento = useMemo(() => baseTrasDescuento * 0.19, [baseTrasDescuento])
-  const totalAPagar = useMemo(() => baseTrasDescuento + ivaTrasDescuento, [baseTrasDescuento, ivaTrasDescuento])
+  
+  const descuentoVal = useMemo(() => subtotal * (descuentoPercent / 100), [subtotal, descuentoPercent])
+  const totalAPagar = useMemo(() => Math.max(0, subtotal - descuentoVal), [subtotal, descuentoVal])
+  
+  // Cálculo del IVA: Los precios incluyen 19% IVA
+  // Si total = base * 1.19, entonces base = total / 1.19, e IVA = total - base
+  const baseNeta = useMemo(() => totalAPagar / 1.19, [totalAPagar])
+  const ivaAmount = useMemo(() => totalAPagar - baseNeta, [totalAPagar, baseNeta])
+  
   const pagoEfectivo = useMemo(() => parseCOP(efectivo||'') || 0, [efectivo])
   const pagoTransferencia = useMemo(() => parseCOP(transferencia||'') || 0, [transferencia])
   const pagoDebito = useMemo(() => parseCOP(tarjetaDebito||'') || 0, [tarjetaDebito])
@@ -237,7 +244,7 @@ export default function Payment({ onBack, onNavigate }) {
           <div className="bg-white dark:bg-neutral-800 rounded-lg border border-gray-200 dark:border-neutral-700 p-4 h-full flex flex-col">
             <h3 className="font-medium mb-4 text-black dark:text-white">Resumen</h3>
             <div className="space-y-2 text-sm">
-              <div className="flex justify-between"><span className="text-gray-600 dark:text-gray-400">Total bruto</span><span className="font-semibold">{formatCOP(baseOriginal)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-600 dark:text-gray-400">Subtotal</span><span className="font-semibold">{formatCOP(subtotal)}</span></div>
               <div>
                 <div className="flex justify-between items-center">
                   <label className="text-gray-600 dark:text-gray-400 text-sm">Descuento (%)</label>
@@ -257,11 +264,11 @@ export default function Payment({ onBack, onNavigate }) {
                 </div>
                 {descuentoPercent > 100 && (<div className="text-[10px] text-red-600 mt-1">% inválido (máx 100).</div>)}
                 {descuentoPercent > 0 && descuentoPercent <= 100 && (
-                  <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-1">Descuento aplicado: {descuentoPercent.toFixed(2)}% ({formatCOP(descuentoVal)})</div>
+                  <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-1">Descuento: {descuentoPercent.toFixed(2)}% ({formatCOP(descuentoVal)})</div>
                 )}
               </div>
-              <div className="flex justify-between"><span className="text-gray-600 dark:text-gray-400">Subtotal</span><span className="font-semibold">{formatCOP(baseTrasDescuento)}</span></div>
-              <div className="flex justify-between"><span className="text-gray-600 dark:text-gray-400">Total IVA</span><span className="font-semibold">{formatCOP(ivaTrasDescuento)}</span></div>
+              <div className="flex justify-between text-xs"><span className="text-gray-600 dark:text-gray-400">Base neta (sin IVA)</span><span className="font-semibold">{formatCOP(baseNeta)}</span></div>
+              <div className="flex justify-between text-xs"><span className="text-gray-600 dark:text-gray-400">IVA (19%)</span><span className="font-semibold text-blue-600 dark:text-blue-400">{formatCOP(ivaAmount)}</span></div>
               <div className="flex justify-between border-t pt-3 mt-3 text-base">
                 <span className="text-gray-700 dark:text-gray-300 font-medium">TOTAL A PAGAR</span>
                 <span className="font-bold text-black dark:text-white text-lg">{formatCOP(totalAPagar)}</span>
