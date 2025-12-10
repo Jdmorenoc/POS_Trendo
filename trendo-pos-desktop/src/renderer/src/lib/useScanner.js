@@ -9,9 +9,16 @@ export function useScanner({ onScan, minLength = 3, timeout = 40 } = {}) {
   const bufferRef = useRef('')
   const lastTimeRef = useRef(0)
   const [buffer, setBuffer] = useState('')
+  const handlerRef = useRef(null)
 
   useEffect(() => {
     function handler(e) {
+      // NO capturar si el usuario está escribiendo en un input o textarea
+      const target = e.target
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        return
+      }
+
       const now = Date.now()
       const delta = now - lastTimeRef.current
       lastTimeRef.current = now
@@ -36,11 +43,19 @@ export function useScanner({ onScan, minLength = 3, timeout = 40 } = {}) {
         setBuffer(bufferRef.current)
       }
     }
+
+    handlerRef.current = handler
     window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
+
+    return () => {
+      if (handlerRef.current) {
+        window.removeEventListener('keydown', handlerRef.current)
+      }
+    }
   }, [onScan, minLength, timeout])
 
   return { buffer }
 }
 
 export default useScanner
+

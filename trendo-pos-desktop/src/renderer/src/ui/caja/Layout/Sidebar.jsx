@@ -23,7 +23,7 @@ export function IconBox({ type }) {
   }
 }
 
-export default function SidebarCaja({ onNavigate, currentView }) {
+export default function SidebarCaja({ onNavigate, currentView, onLogout }) {
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false
     return window.localStorage.getItem('sidebar_caja_collapsed') === '1'
@@ -83,6 +83,23 @@ export default function SidebarCaja({ onNavigate, currentView }) {
           })}
         </ul>
       </nav>
+
+      <div className="border-t border-gray-400 dark:border-neutral-800 p-3 mt-auto">
+        <button
+          onClick={onLogout}
+          className={`w-full flex items-center ${collapsed ? 'gap-2 justify-center' : 'gap-4 justify-start'} px-6 py-3 text-sm font-medium rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 border border-red-200 dark:border-red-800 transition-colors`}
+          title="Cerrar sesión"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" strokeLinecap="round" strokeLinejoin="round"/>
+            <polyline points="16 17 21 12 16 7" strokeLinecap="round" strokeLinejoin="round"/>
+            <line x1="21" y1="12" x2="9" y2="12" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          <span className={`${collapsed ? 'opacity-0 w-0 -ml-2' : 'opacity-100 w-auto ml-0'} transition-all duration-200 whitespace-nowrap overflow-hidden truncate`}>
+            Cerrar sesión
+          </span>
+        </button>
+      </div>
     </aside>
   )
 }

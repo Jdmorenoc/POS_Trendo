@@ -1,11 +1,10 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import {
   setMeta,
   findItemByCode,
   getActiveShift,
   findCustomerByIdentification,
-  upsertCustomer,
-  fetchDianData
+  upsertCustomer
 } from '@/services/db'
 import SidebarCaja from './Layout/Sidebar'
 import { formatCOP } from '@/lib/currency'
@@ -29,10 +28,12 @@ export default function Cash({ onBack, onLogout, onNavigate }) {
   const [lastName, setLastName] = useState('')
   const [secondLastName, setSecondLastName] = useState('')
   const [email, setEmail] = useState('')
-  const [address, setAddress] = useState('')
   const [phoneIndicative, setPhoneIndicative] = useState('+57')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [customerId, setCustomerId] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const identBlurTimeoutRef = useRef(null)
 
   useScanner({ onScan: code => { setSearch(code); handleLookup(code) } })
 
@@ -66,6 +67,16 @@ export default function Cash({ onBack, onLogout, onNavigate }) {
     }
   }
 
+  // Calcular stock disponible considerando lo que ya está en el carrito
+  function getAvailableStock(itemCode, size) {
+    if (!foundItem) return 0
+    const baseStock = parseInt(foundItem[size] || 0)
+    const alreadyInCart = cart
+      .filter(c => c.code === itemCode && c.size === size)
+      .reduce((sum, c) => sum + c.qty, 0)
+    return Math.max(0, baseStock - alreadyInCart)
+  }
+
   async function addLineFromSelection() {
     if (!foundItem) return showToast('Sin producto cargado', 'error')
     const q = parseInt(selectQty)
@@ -73,8 +84,8 @@ export default function Cash({ onBack, onLogout, onNavigate }) {
     if (!['xs', 's', 'm', 'l', 'xl'].includes(selectSize)) return showToast('Talla inválida', 'error')
     if (isNaN(q) || q <= 0) return showToast('Cantidad inválida', 'error')
     if (isNaN(p) || p <= 0) return showToast('Precio inválido', 'error')
-    const available = parseInt(foundItem[selectSize] || 0)
-    if (available < q) return showToast(`Stock insuficiente (${available} disp.)`, 'error')
+    const available = getAvailableStock(foundItem.item, selectSize)
+    if (available < q) return showToast(`Stock insuficiente en talla ${selectSize.toUpperCase()} (${available} disponible)`, 'error')
     setCart(prev => [...prev, { code: foundItem.item, size: selectSize, qty: q, price: p, name: foundItem.title || foundItem.item }])
     setFoundItem(null)
     setSearch('')
@@ -111,7 +122,6 @@ export default function Cash({ onBack, onLogout, onNavigate }) {
     await setMeta('pending_sale', pending)
     if (typeof onNavigate === 'function') onNavigate('payment')
   }
-
   function hydrateCustomer(existing) {
     if (!existing) return
     setCustomerId(existing.customer_id || '')
@@ -123,27 +133,46 @@ export default function Cash({ onBack, onLogout, onNavigate }) {
     setLastName(existing.last_name || '')
     setSecondLastName(existing.second_last_name || '')
     setEmail(existing.email || '')
-    setAddress(existing.address || '')
+    
     setPhoneIndicative(existing.phone_indicative || '+57')
-    setPhoneNumber(existing.phone_number || '')
+    
+    // phone_number ya contiene solo el numero, sin indicativo
+    const phoneNum = existing.phone_number || existing.phoneNumber || ''
+    setPhoneNumber(phoneNum)
   }
 
   async function handleIdentBlur() {
     if (!identNumber.trim()) return
-    try {
-      const existing = await findCustomerByIdentification(identNumber.trim())
-      if (existing && existing.customer_id) {
-        hydrateCustomer(existing)
-        showToast('Cliente cargado', 'success')
-      } else {
-        setCustomerId('')
-        showToast('Cliente no encontrado', 'info')
-      }
-    } catch (error) {
-      console.error('Error buscando cliente:', error)
-      showToast('Error al buscar cliente', 'error')
+    
+    // Usar debounce: si se ejecutó hace poco, no ejecutar de nuevo
+    if (identBlurTimeoutRef.current) {
+      clearTimeout(identBlurTimeoutRef.current)
     }
+
+    identBlurTimeoutRef.current = setTimeout(async () => {
+      try {
+        const existing = await findCustomerByIdentification(identNumber.trim())
+        if (existing && existing.customer_id) {
+          hydrateCustomer(existing)
+          showToast('Cliente cargado', 'success')
+        } else {
+          setCustomerId('')
+          showToast('Cliente no encontrado', 'info')
+        }
+      } catch (error) {
+        console.error('Error buscando cliente:', error)
+        showToast('Error al buscar cliente', 'error')
+      }
+    }, 300)
   }
+
+  useEffect(() => {
+    return () => {
+      if (identBlurTimeoutRef.current) {
+        clearTimeout(identBlurTimeoutRef.current)
+      }
+    }
+  }, [])
 
   async function handleVerifyCustomer() {
     if (!identNumber.trim()) return showToast('Número de identificación requerido', 'error')
@@ -161,6 +190,7 @@ export default function Cash({ onBack, onLogout, onNavigate }) {
 
   async function handleGuardarCliente() {
     if (!identNumber.trim()) return showToast('Identificación requerida', 'error')
+    if (saving) return // Evitar múltiples envíos
 
     // Función helper para trim seguro
     const safeTrim = (value) => {
@@ -175,27 +205,41 @@ export default function Cash({ onBack, onLogout, onNavigate }) {
     
     if (!phoneNum) return showToast('Celular es requerido', 'error')
 
-    // Construir el número de teléfono completo (indicativo + número)
-    const fullPhoneNumber = `${phoneIndicativeVal}${phoneNum}`
-
-    // Payload con los nombres de columna correctos para Supabase
-    const payload = {
-      customer_id: identNumber.trim(),
-      customer_type: clientType,
-      identification_type: identType,
-      first_name: safeTrim(firstName),
-      second_name: safeTrim(secondName),
-      last_name: safeTrim(lastName),
-      second_last_name: safeTrim(secondLastName),
-      email: safeTrim(email),
-      address: safeTrim(address),
-      phone_indicative: phoneIndicativeVal,
-      phone_number: fullPhoneNumber
-    }
-
-    console.log('📋 Payload a guardar:', payload)
-
+    setSaving(true)
+    
     try {
+      // Para empresas, usar el NIT/documento como nombre
+      let fname = null
+      let lname = null
+      
+      if (clientType === 'Empresa') {
+        // Empresa: usar el NIT como first_name, empresa como last_name
+        fname = identNumber.trim()
+        lname = 'Empresa'
+      } else {
+        // Persona: usar los nombres/apellidos capturados
+        fname = safeTrim(firstName)
+        lname = safeTrim(lastName)
+      }
+
+      // Payload con los nombres de columna correctos para Supabase
+      // phone_number: solo el numero sin indicativo
+      // phone_indicative: el indicativo por separado
+      const payload = {
+        customer_id: identNumber.trim(),
+        customer_type: clientType,
+        identification_type: identType,
+        first_name: fname,
+        second_name: safeTrim(secondName),
+        last_name: lname,
+        second_last_name: safeTrim(secondLastName),
+        email: safeTrim(email),
+        phone_indicative: phoneIndicativeVal,
+        phone_number: phoneNum
+      }
+
+      console.log('📋 Payload a guardar:', payload)
+
       const saved = await upsertCustomer(payload)
       if (saved) {
         hydrateCustomer(saved)
@@ -204,13 +248,16 @@ export default function Cash({ onBack, onLogout, onNavigate }) {
     } catch (error) {
       console.error('No se pudo guardar cliente', error)
       showToast(error?.message || 'Error al guardar cliente', 'error')
+    } finally {
+      setSaving(false)
     }
   }
 
   return (
-    <div className="h-full flex bg-white dark:bg-neutral-900 dark:text-gray-100">
-      <SidebarCaja onNavigate={onNavigate} currentView="cash" />
-      <main className="flex-1 p-8 bg-white dark:bg-neutral-900 dark:text-gray-100 min-h-screen">
+    <div className="h-full flex bg-white dark:bg-neutral-900 dark:text-gray-100 overflow-hidden">
+      <SidebarCaja onNavigate={onNavigate} currentView="cash" onLogout={onLogout} />
+      <main className="flex-1 overflow-y-auto bg-white dark:bg-neutral-900 dark:text-gray-100">
+        <div className="p-8">
         <header className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <button onClick={onBack} title="Volver" className="p-2 rounded bg-black text-white hover:bg-gray-900 transition-colors">
@@ -228,7 +275,7 @@ export default function Cash({ onBack, onLogout, onNavigate }) {
           <button onClick={onLogout} className="px-3 py-2 bg-white dark:bg-neutral-800 text-gray-900 dark:text-gray-100 rounded border border-gray-300 dark:border-neutral-700 hover:bg-gray-100 dark:hover:bg-neutral-700">Cerrar sesión</button>
         </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 relative">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-6 relative">
           {toast && (
             <div className="fixed right-6 top-6 z-50">
               <div className={`${toast.type === 'error' ? 'bg-red-600' : toast.type === 'success' ? 'bg-green-600' : 'bg-black'} text-white px-3 py-2 rounded shadow text-sm`}>{toast.msg}</div>
@@ -250,10 +297,10 @@ export default function Cash({ onBack, onLogout, onNavigate }) {
               <div className="space-y-3">
                 <div className="text-xs text-gray-600 dark:text-gray-400">ITEM: <span className="font-semibold text-black dark:text-white">{foundItem.item}</span></div>
                 <div className="text-xs text-gray-600 dark:text-gray-400">Título: <span className="font-semibold text-black dark:text-white">{foundItem.title || '—'}</span></div>
-                <div className="grid grid-cols-5 gap-1 text-[10px]">
+                <div className="grid grid-cols-5 gap-0.5 text-[10px]">
                   {['xs', 's', 'm', 'l', 'xl'].map(sz => (
                     <div key={sz} className={`p-1 rounded border text-center ${selectSize === sz ? 'bg-black text-white dark:bg-white dark:text-black' : 'bg-gray-50 dark:bg-neutral-700 text-gray-700 dark:text-gray-300'} border-gray-300 dark:border-neutral-600 cursor-pointer`} onClick={() => setSelectSize(sz)}>
-                      {sz.toUpperCase()} ({foundItem[sz] || 0})
+                      {sz.toUpperCase()} ({getAvailableStock(foundItem.item, sz)})
                     </div>
                   ))}
                 </div>
@@ -317,7 +364,7 @@ export default function Cash({ onBack, onLogout, onNavigate }) {
                   <option>Empresa</option>
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
                   <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Tipo Ident.</label>
                   <select value={identType} onChange={e => setIdentType(e.target.value)} className="w-full px-2 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-xs text-gray-900 dark:text-gray-100">
@@ -331,7 +378,7 @@ export default function Cash({ onBack, onLogout, onNavigate }) {
               </div>
 
               {clientType === 'Persona' && (
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
                     <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Primer Nombre</label>
                     <input value={firstName} onChange={e => setFirstName(e.target.value)} className="w-full px-2 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-xs text-gray-900 dark:text-gray-100" />
@@ -358,12 +405,7 @@ export default function Cash({ onBack, onLogout, onNavigate }) {
                 <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-2 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-xs text-gray-900 dark:text-gray-100" />
               </div>
 
-              <div>
-                <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Dirección</label>
-                <input value={address} onChange={e => setAddress(e.target.value)} className="w-full px-2 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-xs text-gray-900 dark:text-gray-100" placeholder="Dirección de residencia o fiscal" />
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <div>
                   <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Indicativo</label>
                   <input value={phoneIndicative} onChange={e => setPhoneIndicative(e.target.value)} className="w-full px-2 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-xs text-gray-900 dark:text-gray-100" />
@@ -376,7 +418,7 @@ export default function Cash({ onBack, onLogout, onNavigate }) {
 
               <div className="flex gap-2">
                 <button onClick={handleVerifyCustomer} className="flex-1 px-3 py-2 rounded bg-green-600 text-white text-xs hover:bg-green-700 disabled:opacity-50 font-medium">{customerId ? '✓ Cliente Asegurado' : 'Confirmar Cliente'}</button>
-                <button onClick={handleGuardarCliente} className="flex-1 px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 text-xs hover:bg-gray-50 dark:hover:bg-neutral-700">Guardar Cliente</button>
+                <button onClick={handleGuardarCliente} disabled={saving} className="flex-1 px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 text-xs hover:bg-gray-50 dark:hover:bg-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed">{saving ? 'Guardando…' : 'Guardar Cliente'}</button>
               </div>
               {customerId && (
                 <div className="text-[10px] text-green-600 dark:text-green-400">Cliente listo: {customerId.slice(0, 8)}</div>
@@ -398,7 +440,7 @@ export default function Cash({ onBack, onLogout, onNavigate }) {
           </div>
 
           <div className="lg:col-span-2">
-            <div className="mt-2 bg-white dark:bg-neutral-800 rounded-lg border border-gray-200 dark:border-neutral-700 p-4 flex flex-col md:flex-row items-center gap-6 justify-center">
+            <div className="mt-2 bg-white dark:bg-neutral-800 rounded-lg border border-gray-200 dark:border-neutral-700 p-3 sm:p-4 flex flex-col sm:flex-row items-center gap-3 sm:gap-6 justify-center overflow-x-auto">
               <div className="flex flex-col items-center md:items-start gap-1">
                 <div className="text-xs text-gray-500 dark:text-gray-400 tracking-wide">TOTAL COMPRA</div>
                 <div className="text-4xl font-bold text-black dark:text-white leading-tight">{formatCOP(total)}</div>
@@ -414,6 +456,7 @@ export default function Cash({ onBack, onLogout, onNavigate }) {
             {activeShift && !customerValid() && (<div className="text-xs text-gray-600 mt-2">Complete datos del cliente para continuar.</div>)}
             {activeShift && customerValid() && cart.length === 0 && (<div className="text-xs text-gray-600 mt-2">Agregue al menos un producto.</div>)}
           </div>
+        </div>
         </div>
       </main>
     </div>

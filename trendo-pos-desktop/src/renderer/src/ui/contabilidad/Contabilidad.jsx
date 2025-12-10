@@ -288,8 +288,9 @@ export default function Contabilidad({ onBack }) {
   }
 
   return (
-    <div className="h-full flex bg-white dark:bg-neutral-900 dark:text-gray-100">
-      <main className="flex-1 p-6 bg-white dark:bg-neutral-900 dark:text-gray-100 flex flex-col">
+    <div className="h-full flex bg-white dark:bg-neutral-900 dark:text-gray-100 overflow-hidden">
+      <main className="flex-1 overflow-y-auto bg-white dark:bg-neutral-900 dark:text-gray-100">
+        <div className="p-6">
         <Header onBack={onBack} title="Contabilidad" showBack={true} />
 
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-4">
@@ -613,6 +614,7 @@ export default function Contabilidad({ onBack }) {
             </div>
           </div>
         )}
+        </div>
       </main>
     </div>
   )

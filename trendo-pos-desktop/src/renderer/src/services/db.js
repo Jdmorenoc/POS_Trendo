@@ -120,6 +120,17 @@ db.version(10).stores({
   })
 })
 
+// Version 11: add bills table for detailed invoice/bill line items
+db.version(11).stores({
+  items: 'id, item, gender, updated_at, dirty, deleted, xs, s, m, l, xl',
+  meta: 'key',
+  returns: 'id, itemId, purchased_at, created_at, dirty, deleted',
+  sales: 'id, created_at, updated_at, method, total, items, shiftId, customerId, tipoComprobante, dirty, deleted',
+  shifts: 'id, opened_at, closed_at, userEmail, initialCash, finalCash, active',
+  customers: 'id, identificationNumber, identificationType, type, email, dirty, deleted',
+  bills: 'id, sale_consecutive, buy_consecutive, product_id, customer_document, created_at, dirty, deleted'
+})
+
 export async function getMeta(key, defaultValue = null) {
   const value = await db.table('meta').get(key)
   return value?.value ?? defaultValue
@@ -423,7 +434,6 @@ export async function upsertCustomer(c) {
     last_name: c.last_name || c.apellidos || null,
     second_last_name: c.second_last_name || null,
     email: c.email || null,
-    address: c.address || null,
     phone_indicative: c.phone_indicative || c.phoneIndicative || '+57',
     phone_number: c.phone_number || c.phoneNumber || null
   }
@@ -459,9 +469,7 @@ export async function findCustomerByIdentification(identificationNumber) {
   
   // Buscar primero en local (IndexedDB)
   const local = await db.table('customers').where('identificationNumber').equals(normalized).first()
-  // También buscar por customer_id por si se guardó con ese campo
-  const localById = local || await db.table('customers').where('customer_id').equals(normalized).first()
-  if (localById) return localById
+  if (local) return local
 
   const online = typeof navigator !== 'undefined' ? navigator.onLine : false
   const remote = customerRemoteTable()
@@ -538,4 +546,143 @@ export async function fetchDianData(identificationType, identificationNumber) {
     phoneIndicative: '+57',
     phoneNumber: '3009876543'
   }
+}
+
+// Bills API
+// Obtener el siguiente line_item global (consecutivo único para toda la tabla)
+export async function getNextLineItem() {
+  const allBills = await db.table('bills').toArray()
+  if (allBills.length === 0) return 1
+  const maxLineItem = Math.max(...allBills.map(b => b.line_item || 0))
+  return maxLineItem + 1
+}
+
+export async function addBill(billData) {
+  const id = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString()
+  const now = new Date().toISOString()
+  
+  // Obtener el siguiente line_item consecutivo global
+  const nextLineItem = await getNextLineItem()
+  
+  const bill = {
+    id,
+    line_item: nextLineItem, // Usar consecutivo global único
+    quantity: billData.quantity || 0,
+    price: billData.price || 0,
+    type_transaction: billData.type_transaction || 'efectivo',
+    sale_consecutive: billData.sale_consecutive || null,
+    buy_consecutive: billData.buy_consecutive || null,
+    product_id: billData.product_id || null,
+    customer_document: billData.customer_document !== undefined ? billData.customer_document : '', // Preservar cadena vacía, NO convertir a null
+    created_at: now,
+    updated_at: now,
+    dirty: 1,
+    deleted: 0,
+    synced: false
+  }
+  
+  await db.table('bills').add(bill)
+  return bill
+}
+
+export async function upsertBill(bill) {
+  const now = new Date().toISOString()
+  
+  const toSave = {
+    ...bill,
+    updated_at: bill.updated_at || now,
+    dirty: 1,
+    deleted: bill.deleted ? 1 : 0,
+    synced: false
+  }
+  
+  await db.table('bills').put(toSave)
+  return toSave
+}
+
+export async function getBillById(billId) {
+  return db.table('bills').get(billId)
+}
+
+export async function getBillsBySaleConsecutive(saleConsecutive) {
+  return db.table('bills')
+    .where('sale_consecutive')
+    .equals(saleConsecutive)
+    .filter(bill => bill.deleted === 0)
+    .toArray()
+}
+
+export async function getBillsByBuyConsecutive(buyConsecutive) {
+  return db.table('bills')
+    .where('buy_consecutive')
+    .equals(buyConsecutive)
+    .filter(bill => bill.deleted === 0)
+    .toArray()
+}
+
+export async function getBillsByProduct(productId) {
+  return db.table('bills')
+    .where('product_id')
+    .equals(productId)
+    .filter(bill => bill.deleted === 0)
+    .toArray()
+}
+
+export async function getBillsByCustomer(customerDocument) {
+  return db.table('bills')
+    .where('customer_document')
+    .equals(customerDocument)
+    .filter(bill => bill.deleted === 0)
+    .toArray()
+}
+
+export async function listBills(limit = 100) {
+  return db.table('bills')
+    .where('deleted')
+    .equals(0)
+    .reverse()
+    .limit(limit)
+    .toArray()
+}
+
+export async function deleteBill(billId) {
+  const bill = await db.table('bills').get(billId)
+  if (bill) {
+    bill.deleted = 1
+    bill.dirty = 1
+    await db.table('bills').put(bill)
+  }
+  return bill
+}
+
+export async function getDirtyBills() {
+  return db.table('bills').where('dirty').equals(1).toArray()
+}
+
+export async function markBillsClean(ids = []) {
+  if (!Array.isArray(ids) || ids.length === 0) return
+  await db.table('bills').where('id').anyOf(ids).modify({ dirty: 0, synced: true })
+}
+
+export async function bulkUpsertBills(bills = []) {
+  if (!Array.isArray(bills) || bills.length === 0) return
+  const now = new Date().toISOString()
+  const toInsert = bills.map(bill => ({
+    ...bill,
+    updated_at: bill.updated_at || now,
+    dirty: 0,
+    deleted: bill.deleted ? 1 : 0,
+    synced: true
+  }))
+  await db.table('bills').bulkPut(toInsert)
+}
+
+// Obtener ventas por identificación del cliente
+export async function getSalesByCustomerId(customerId) {
+  return db.table('sales').where('customerId').equals(customerId).toArray()
+}
+
+// Obtener bills por sale_consecutive (para ver detalles de la venta)
+export async function getBillsBySaleId(saleId) {
+  return db.table('bills').where('sale_consecutive').equals(saleId).toArray()
 }

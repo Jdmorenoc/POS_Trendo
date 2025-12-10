@@ -61,16 +61,26 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
   const [adjustItemData, setAdjustItemData] = useState(null)
   const [adjustData, setAdjustData] = useState({ size: '', qty: '', reason: '' })
   const [adjustError, setAdjustError] = useState('')
+  // Filtro por género
+  const [genderFilter, setGenderFilter] = useState('Todos')
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return visibleItems
-    return visibleItems.filter(i =>
+    let result = visibleItems
+    
+    // Filtrar por género
+    if (genderFilter !== 'Todos') {
+      result = result.filter(i => (i.gender || i.gender_prod || '').trim() === genderFilter)
+    }
+    
+    // Filtrar por búsqueda
+    if (!q) return result
+    return result.filter(i =>
       (i.title || '').toLowerCase().includes(q) ||
       (i.id || '').toLowerCase().includes(q) ||
       (i.item || '').toLowerCase().includes(q)
     )
-  }, [visibleItems, search])
+  }, [visibleItems, search, genderFilter])
 
   useEffect(() => {
     syncAll()
@@ -378,9 +388,10 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
   }
 
   return (
-    <div className="h-full flex bg-white dark:bg-neutral-900 dark:text-gray-100">
+    <div className="h-full flex bg-white dark:bg-neutral-900 dark:text-gray-100 overflow-hidden">
       <Sidebar onNavigate={onNavigate} currentView="inventory" onLogout={onLogout} />
-      <main className="flex-1 p-6 bg-white dark:bg-neutral-900 dark:text-gray-100 flex flex-col">
+      <main className="flex-1 overflow-y-auto bg-white dark:bg-neutral-900 dark:text-gray-100">
+        <div className="p-6">
         <Header onBack={onBack} title="Productos" showBack={true} />
 
         <div className="flex flex-col gap-4 mb-6">
@@ -527,6 +538,31 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
 
         <section className="flex-1 min-h-0">
           <div className="border border-gray-300 dark:border-neutral-700 rounded-lg bg-white dark:bg-neutral-800 flex flex-col h-full">
+            {/* Filtros de género */}
+            <div className="px-4 py-3 border-b border-gray-200 dark:border-neutral-700 flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Filtrar por:</span>
+              <div className="flex gap-2">
+                {['Todos', 'Hombre', 'Mujer'].map(gender => (
+                  <button
+                    key={gender}
+                    onClick={() => setGenderFilter(gender)}
+                    className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                      genderFilter === gender
+                        ? 'bg-blue-600 text-white shadow-md'
+                        : 'bg-gray-100 dark:bg-neutral-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-neutral-600'
+                    }`}
+                  >
+                    {gender}
+                  </button>
+                ))}
+              </div>
+              {filtered.length > 0 && (
+                <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
+                  {filtered.length} producto{filtered.length !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+
             <div className="overflow-x-auto">
               <div className="max-h-[69vh] overflow-y-auto">
                 <table className="min-w-full text-sm">
@@ -904,6 +940,7 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
 
         <div className="mt-auto">
           <Footer compact />
+        </div>
         </div>
       </main>
     </div>

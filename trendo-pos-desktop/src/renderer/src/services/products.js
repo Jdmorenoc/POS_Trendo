@@ -1,3 +1,4 @@
+/* eslint-disable no-undef */
 import { supabase } from './supabaseClient'
 
 // Validación de seguridad

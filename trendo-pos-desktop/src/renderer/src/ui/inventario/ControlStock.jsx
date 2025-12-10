@@ -105,9 +105,10 @@ export default function ControlStock({ onBack, onLogout, onNavigate }) {
   // submitAdjust eliminado (funcionalidad trasladada a Inventory)
 
   return (
-    <div className="h-full flex bg-white dark:bg-neutral-900 dark:text-gray-100">
+    <div className="h-full flex bg-white dark:bg-neutral-900 dark:text-gray-100 overflow-hidden">
       <Sidebar onNavigate={onNavigate} currentView="controlStock" onLogout={onLogout} />
-      <main className="flex-1 p-6 bg-white dark:bg-neutral-900 dark:text-gray-100 flex flex-col">
+      <main className="flex-1 overflow-y-auto bg-white dark:bg-neutral-900 dark:text-gray-100">
+        <div className="p-6">
         <Header onBack={onBack} title="Control de Stock" />
         
         <section>
@@ -265,6 +266,7 @@ export default function ControlStock({ onBack, onLogout, onNavigate }) {
 
         <div className="mt-auto">
           <Footer compact />
+        </div>
         </div>
       </main>
     </div>

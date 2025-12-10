@@ -280,6 +280,61 @@ export async function syncAuthUserToEmployee(employeeFormData) {
 }
 
 /**
+ * Sincroniza cambios de perfil del usuario autenticado a la tabla employee
+ * Se usa cuando el usuario edita su perfil en la sección de Configuración
+ * @param {Object} profileUpdates - Datos actualizados del perfil (displayName, email)
+ * @returns {Promise<Object>} Empleado actualizado
+ */
+export async function syncProfileChangesToEmployee(profileUpdates) {
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+      throw new Error('No hay usuario autenticado')
+    }
+
+    console.log('🔄 Sincronizando cambios de perfil a tabla employee:', user.email)
+
+    // Obtener empleado actual por auth_user_id
+    const employee = await getEmployeeByAuthUserId(user.id)
+
+    if (!employee) {
+      console.warn('⚠️ No se encontró empleado para sincronizar cambios de perfil')
+      return null
+    }
+
+    // Preparar actualizaciones
+    const updates = {}
+
+    // Actualizar nombre si cambió
+    if (profileUpdates.displayName && profileUpdates.displayName !== employee.first_name) {
+      // Para simplificar, usar displayName como first_name
+      // Si necesitas separar en first_name y last_name, ajusta aquí
+      updates.first_name = profileUpdates.displayName
+    }
+
+    // Actualizar email si cambió
+    if (profileUpdates.email && profileUpdates.email !== employee.email) {
+      updates.email = profileUpdates.email
+    }
+
+    // Solo actualizar si hay cambios
+    if (Object.keys(updates).length === 0) {
+      console.log('✅ No hay cambios de perfil para sincronizar')
+      return employee
+    }
+
+    const result = await updateEmployee(employee.em_document, updates)
+    console.log('✅ Cambios de perfil sincronizados a tabla employee')
+
+    return result
+  } catch (error) {
+    console.error('Error sincronizando cambios de perfil:', error.message)
+    throw error
+  }
+}
+
+/**
  * Obtiene el empleado del usuario autenticado actual
  * @returns {Promise<Object|null>} Datos del empleado o null
  */

@@ -1,5 +1,6 @@
+/* eslint-disable no-undef */
 import { useEffect, useState, useMemo } from 'react'
-import { listReturns, addReturn, deleteReturn, listItems, findItemByCode, getActiveShift } from '@/services/db'
+import { listReturns, addReturn, listItems, findItemByCode, getActiveShift, setMeta, getSalesByCustomerId, getBillsBySaleId } from '@/services/db'
 import { formatCOP } from '@/lib/currency'
 import { liveQuery } from 'dexie'
 import SidebarCaja from './Layout/Sidebar'
@@ -42,6 +43,31 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
   const [newCart, setNewCart] = useState([])
   const [newSearch, setNewSearch] = useState('')
   const [newFoundItem, setNewFoundItem] = useState(null)
+  const [newSelectSize, setNewSelectSize] = useState('')
+  const [newSelectQty, setNewSelectQty] = useState(1)
+
+  // Estados para búsqueda por cédula
+  const [cedularSearch, setCedularSearch] = useState('')
+  const [cedularOrders, setCedularOrders] = useState([])
+  const [selectedOrder, setSelectedOrder] = useState(null)
+  const [selectedItem, setSelectedItem] = useState(null)
+  const [selectedItemSize, setSelectedItemSize] = useState('')
+
+  // Estados para modal de cliente antes de Payment
+  const [showCustomerModal, setShowCustomerModal] = useState(false)
+  const [savingCustomer, setSavingCustomer] = useState(false)
+  const [customerForm, setCustomerForm] = useState({
+    customer_id: '',
+    customer_type: 'Persona',
+    identification_type: 'CC',
+    first_name: '',
+    second_name: '',
+    last_name: '',
+    second_last_name: '',
+    email: '',
+    phone_indicative: '+57',
+    phone_number: ''
+  })
 
   // Verificar turno activo al montar
   useEffect(() => {
@@ -49,8 +75,8 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
       try {
         const shift = await getActiveShift()
         setActiveShift(shift)
-      } catch (e) {
-        console.error('Error verificando turno:', e)
+      } catch {
+        // Error silencioso
         setActiveShift(null)
       } finally {
         setShiftLoading(false)
@@ -139,9 +165,111 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
       setDevForm({ purchasedAt: '', reason: '' })
       setFoundItem(null)
       setSearch('')
-    } catch (e) {
+    } catch {
       showToast('Error al registrar devoluciones', 'error')
-      console.error(e)
+    }
+  }
+  async function handleCedularLookup(cedula) {
+    const cedText = String(cedula || cedularSearch).trim()
+    if (!cedText) { setCedularOrders([]); return }
+    
+    try {
+      const sales = await getSalesByCustomerId(cedText)
+      if (!sales || sales.length === 0) {
+        showToast('No hay compras con esta cédula', 'error')
+        setCedularOrders([])
+        return
+      }
+
+      // Agrupar por fecha de compra y obtener items de cada venta
+      const groupedByDate = {}
+      
+      for (const sale of sales) {
+        const date = sale.created_at ? new Date(sale.created_at).toLocaleDateString('es-ES') : 'Fecha desconocida'
+        if (!groupedByDate[date]) groupedByDate[date] = []
+        
+        // Obtener los bills (items) de esta venta
+        const bills = await getBillsBySaleId(sale.id)
+        
+        // Expandir cada bill en la venta: si hay cantidad > 1, crear una entrada por cada unidad
+        if (bills && Array.isArray(bills)) {
+          bills.forEach((bill, billIdx) => {
+            const qty = bill.quantity || 1
+            for (let i = 0; i < qty; i++) {
+              groupedByDate[date].push({
+                ...sale,
+                expandedItem: {
+                  product_id: bill.product_id || 'SIN ID',
+                  product_name: bill.product_name || 'Producto',
+                  price: bill.price || 0,
+                  size: bill.size || '',
+                  billId: bill.id,
+                  originalIndex: billIdx,
+                  unitNumber: i + 1,
+                  totalQty: qty
+                }
+              })
+            }
+          })
+        }
+      }
+
+      // Convertir a array ordenado por fecha
+      const orderedOrders = Object.entries(groupedByDate)
+        .sort((a, b) => {
+          const dateA = a[0] === 'Fecha desconocida' ? new Date(0) : new Date(a[0].split('/').reverse().join('-'))
+          const dateB = b[0] === 'Fecha desconocida' ? new Date(0) : new Date(b[0].split('/').reverse().join('-'))
+          return dateB - dateA
+        })
+        .map(([date, items]) => ({ date, items }))
+
+      setCedularOrders(orderedOrders)
+      setSelectedOrder(null)
+      setSelectedItem(null)
+      showToast(`${sales.length} compra(s) encontrada(s)`, 'success')
+    } catch {
+      showToast('Error al buscar compras', 'error')
+    }
+  }
+
+  async function confirmDevolution() {
+    if (!selectedItem) return showToast('Selecciona un item', 'error')
+    if (!selectedItemSize) return showToast('Selecciona una talla', 'error')
+
+    try {
+      // Obtener el item seleccionado del estado actual
+      const [orderIdx, itemIdx] = selectedItem.split('_').map(Number)
+      const order = cedularOrders[orderIdx]
+      const item = order?.items[itemIdx]
+      
+      if (!item || !item.expandedItem) {
+        return showToast('Item no encontrado', 'error')
+      }
+
+      const expandedItem = item.expandedItem
+
+      const newItem = {
+        id: `dev_${Date.now()}`,
+        itemId: expandedItem.product_id,
+        itemName: expandedItem.product_name || 'Producto',
+        itemCode: expandedItem.product_id || 'UNKNOWN',
+        itemPrice: expandedItem.price || 0,
+        purchasedAt: item.created_at ? new Date(item.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        reason: 'Cliente solicitó devolución',
+        refundAmount: expandedItem.price || 0,
+        size: selectedItemSize
+      }
+
+      setDevolutionList([...devolutionList, newItem])
+      showToast('Producto agregado a artículos a devolver', 'success')
+
+      setCedularSearch('')
+      setCedularOrders([])
+      setSelectedOrder(null)
+      setSelectedItem(null)
+      setSelectedItemSize('')
+    } catch {
+      showToast('Error al procesar devolución', 'error')
     }
   }
 
@@ -155,6 +283,11 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
 
   function addToNewCart() {
     if (!newFoundItem) return showToast('Selecciona un producto', 'error')
+    if (!newSelectSize) return showToast('Selecciona una talla', 'error')
+    
+    const qty = parseInt(newSelectQty) || 1
+    const available = getAvailableStockNew(newFoundItem.item, newSelectSize)
+    if (available < qty) return showToast(`Stock insuficiente en talla ${newSelectSize.toUpperCase()} (${available} disponible)`, 'error')
     
     setNewCart([...newCart, {
       id: `cart_${Date.now()}`,
@@ -162,12 +295,25 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
       itemName: newFoundItem.title || newFoundItem.item,
       itemCode: newFoundItem.item || newFoundItem.id.slice(0, 8),
       price: newFoundItem.price || 0,
-      quantity: 1
+      quantity: qty,
+      size: newSelectSize
     }])
 
     setNewFoundItem(null)
     setNewSearch('')
+    setNewSelectSize('')
+    setNewSelectQty(1)
     showToast('Producto agregado', 'success')
+  }
+
+  // Calcular stock disponible considerando lo que ya está en newCart
+  function getAvailableStockNew(itemCode, size) {
+    if (!newFoundItem) return 0
+    const baseStock = parseInt(newFoundItem[size] || 0)
+    const alreadyInCart = newCart
+      .filter(c => c.itemCode === itemCode && c.size === size)
+      .reduce((sum, c) => sum + c.quantity, 0)
+    return Math.max(0, baseStock - alreadyInCart)
   }
 
   function removeFromNewCart(id) {
@@ -185,14 +331,105 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
   function proceedToPayment() {
     if (newCart.length === 0) return showToast('Agrega productos a la compra', 'error')
     
+    // Mostrar modal para ingresar datos del cliente
+    setCustomerForm({
+      customer_id: '',
+      customer_type: 'Persona',
+      identification_type: 'CC',
+      first_name: '',
+      second_name: '',
+      last_name: '',
+      second_last_name: '',
+      email: '',
+      phone_indicative: '+57',
+      phone_number: ''
+    })
+    setShowCustomerModal(true)
+  }
+
+  async function handleSaveCustomer() {
+    if (!customerForm.customer_id.trim()) {
+      showToast('Ingresa el documento del cliente', 'error')
+      return
+    }
+
+    const safeTrim = (value) => {
+      if (!value || typeof value !== 'string') return null
+      const trimmed = value.trim()
+      return trimmed.length > 0 ? trimmed : null
+    }
+
+    setSavingCustomer(true)
+    try {
+      // Guardar numero y indicativo por separado
+      const phoneNum = safeTrim(customerForm.phone_number)
+      const phoneIndicativeVal = safeTrim(customerForm.phone_indicative) || '+57'
+
+      // Para empresas, usar el NIT/documento como nombre
+      let firstName = null
+      let lastName = null
+      
+      if (customerForm.customer_type === 'Empresa') {
+        // Empresa: usar el NIT como first_name, empresa como last_name
+        firstName = customerForm.customer_id.trim()
+        lastName = 'Empresa'
+      } else {
+        // Persona: usar los nombres/apellidos capturados
+        firstName = safeTrim(customerForm.first_name)
+        lastName = safeTrim(customerForm.last_name)
+      }
+
+      const payload = {
+        customer_id: customerForm.customer_id.trim(),
+        customer_type: customerForm.customer_type,
+        identification_type: customerForm.identification_type,
+        first_name: firstName,
+        second_name: safeTrim(customerForm.second_name),
+        last_name: lastName,
+        second_last_name: safeTrim(customerForm.second_last_name),
+        email: safeTrim(customerForm.email),
+        phone_indicative: phoneIndicativeVal,
+        phone_number: phoneNum
+      }
+
+      console.log('📋 Guardando cliente:', payload)
+      const { upsertCustomer } = await import('@/services/db')
+      await upsertCustomer(payload)
+      showToast('Cliente guardado correctamente', 'success')
+    } catch (error) {
+      console.error('Error guardando cliente:', error)
+      showToast(error?.message || 'Error al guardar cliente', 'error')
+    } finally {
+      setSavingCustomer(false)
+    }
+  }
+
+  function handleConfirmCustomerAndProceed() {
+    if (!customerForm.customer_id.trim()) {
+      showToast('Ingresa el documento del cliente', 'error')
+      return
+    }
+
     // Pasar al componente Payment con los datos
-    onNavigate('payment', {
-      items: newCart,
+    const cartFormatted = newCart.map(item => ({
+      code: item.itemCode,
+      price: item.price,
+      qty: item.quantity,
+      size: item.size
+    }))
+    
+    setMeta('pending_sale', {
+      cart: cartFormatted,
+      items: newCart.length,
       creditMode: true,
       creditAmount: creditAmount,
       totalSale: newCartTotal,
-      balance: balance
+      balance: balance,
+      customer: customerForm // Pasar todos los datos del cliente al Payment
     })
+    
+    setShowCustomerModal(false)
+    onNavigate('payment')
   }
 
   return (
@@ -250,7 +487,7 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
               </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-6">
               {/* Panel Izquierdo: Búsqueda de productos */}
               <div className="bg-white dark:bg-neutral-800 rounded-lg border border-gray-200 dark:border-neutral-700 p-4">
                 <h3 className="font-medium mb-3 text-black dark:text-white">Agregar Productos</h3>
@@ -274,9 +511,36 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
                       <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Precio: <span className="font-semibold text-black dark:text-white">{formatCOP(newFoundItem.price || 0)}</span></div>
                     </div>
 
+                    <div>
+                      <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Seleccionar Talla</label>
+                      <div className="grid grid-cols-5 gap-0.5 text-[10px]">
+                        {['xs', 's', 'm', 'l', 'xl'].map(sz => (
+                          <button
+                            key={sz}
+                            onClick={() => setNewSelectSize(sz)}
+                            className={`p-1 rounded border text-center ${newSelectSize === sz ? 'bg-black text-white dark:bg-white dark:text-black' : 'bg-gray-50 dark:bg-neutral-700 text-gray-700 dark:text-gray-300'} border-gray-300 dark:border-neutral-600 cursor-pointer hover:bg-gray-200 dark:hover:bg-neutral-600`}
+                          >
+                            {sz.toUpperCase()} ({getAvailableStockNew(newFoundItem.item, sz)})
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Cantidad</label>
+                      <input
+                        type="number"
+                        value={newSelectQty}
+                        onChange={e => setNewSelectQty(e.target.value)}
+                        min="1"
+                        className="w-full bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 rounded px-2 py-1 border border-gray-300 dark:border-neutral-600 text-sm"
+                      />
+                    </div>
+
                     <button
                       onClick={addToNewCart}
-                      className="w-full px-3 py-2 rounded bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-200 text-sm font-medium transition-colors"
+                      disabled={!newSelectSize}
+                      className="w-full px-3 py-2 rounded bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-200 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Agregar al Carrito
                     </button>
@@ -298,7 +562,7 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
                         <div>
                           <div className="font-medium text-blue-900 dark:text-blue-300">{item.itemName}</div>
                           <div className="text-blue-700 dark:text-blue-400 mt-1">
-                            {formatCOP(item.price)} x {item.quantity} = {formatCOP(item.price * item.quantity)}
+                            Talla: {item.size?.toUpperCase() || 'N/A'} | {formatCOP(item.price)} x {item.quantity} = {formatCOP(item.price * item.quantity)}
                           </div>
                         </div>
                         <button
@@ -376,7 +640,121 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
               </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 relative">
+            {/* Búsqueda por Cédula */}
+            <div className="mb-6 bg-white dark:bg-neutral-800 rounded-lg border border-gray-200 dark:border-neutral-700 p-4">
+              <h3 className="font-medium mb-3 text-black dark:text-white">Búsqueda por Cédula del Cliente</h3>
+              
+              <label className="block text-sm mb-1 text-black dark:text-gray-200">Ingresar Cédula</label>
+              <div className="flex gap-2 mb-4">
+                <input
+                  value={cedularSearch}
+                  onChange={e => setCedularSearch(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCedularLookup(cedularSearch) } }}
+                  className="flex-1 bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 rounded px-3 py-2 border border-gray-300 dark:border-neutral-600"
+                  placeholder="Cédula del cliente"
+                />
+                <button
+                  onClick={() => handleCedularLookup(cedularSearch)}
+                  className="px-4 py-2 rounded bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-200 text-sm font-medium transition-colors"
+                >
+                  Buscar
+                </button>
+              </div>
+
+              {cedularOrders.length > 0 && (
+                <div className="space-y-2">
+                  {cedularOrders.map((order, orderIdx) => (
+                    <div key={`order_${orderIdx}`} className="border border-gray-300 dark:border-neutral-600 rounded overflow-hidden">
+                      {/* Encabezado de Orden */}
+                      <button
+                        onClick={() => setSelectedOrder(selectedOrder === orderIdx ? null : orderIdx)}
+                        className="w-full px-3 py-2 bg-gray-100 dark:bg-neutral-700 hover:bg-gray-200 dark:hover:bg-neutral-600 transition-colors flex items-center justify-between"
+                      >
+                        <div className="text-left">
+                          <div className="text-sm font-semibold text-black dark:text-white">{order.date}</div>
+                          <div className="text-xs text-gray-600 dark:text-gray-400">{order.items.length} artículo(s)</div>
+                        </div>
+                        <svg className={`w-5 h-5 text-gray-600 dark:text-gray-400 transition-transform ${selectedOrder === orderIdx ? 'rotate-180' : ''}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                        </svg>
+                      </button>
+
+                      {/* Items dentro de la Orden */}
+                      {selectedOrder === orderIdx && (
+                        <div className="bg-gray-50 dark:bg-neutral-700/30 p-3 space-y-2 border-t border-gray-300 dark:border-neutral-600">
+                          {order.items.map((item, itemIdx) => (
+                            <div key={`item_${orderIdx}_${itemIdx}`} className="p-2 bg-white dark:bg-neutral-700 rounded border border-gray-200 dark:border-neutral-600">
+                              {selectedItem === `${orderIdx}_${itemIdx}` ? (
+                                <div className="space-y-2">
+                                  <div>
+                                    <div className="text-xs text-gray-500 dark:text-gray-400">ID: <span className="font-semibold text-black dark:text-white">{item.expandedItem?.product_id || 'SIN ID'}</span></div>
+                                    <div className="text-sm font-semibold text-black dark:text-white mt-1">{item.expandedItem?.product_name || 'Producto'}</div>
+                                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">Precio: <span className="font-semibold text-black dark:text-white">{formatCOP(item.expandedItem?.price || 0)}</span></div>
+                                    {item.expandedItem?.totalQty > 1 && (
+                                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Unidad {item.expandedItem?.unitNumber} de {item.expandedItem?.totalQty}</div>
+                                    )}
+                                  </div>
+
+                                  {/* Selector de Talla */}
+                                  <div>
+                                    <label className="block text-xs font-medium mb-2 text-gray-600 dark:text-gray-300">Seleccionar Talla *</label>
+                                    <div className="grid grid-cols-5 gap-0.5">
+                                      {['xs', 's', 'm', 'l', 'xl'].map(size => (
+                                        <button
+                                          key={size}
+                                          onClick={() => setSelectedItemSize(size)}
+                                          className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                                            selectedItemSize === size
+                                              ? 'bg-black text-white dark:bg-white dark:text-black'
+                                              : 'bg-gray-200 dark:bg-neutral-600 text-black dark:text-gray-100 hover:bg-gray-300 dark:hover:bg-neutral-500'
+                                          }`}
+                                        >
+                                          {size.toUpperCase()}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+
+                                  {/* Botones de Acción */}
+                                  <div className="flex gap-2 pt-2">
+                                    <button
+                                      onClick={confirmDevolution}
+                                      className="flex-1 px-2 py-2 bg-green-600 hover:bg-green-700 text-white rounded text-xs font-medium transition-colors"
+                                    >
+                                      Confirmar
+                                    </button>
+                                    <button
+                                      onClick={() => { setSelectedItem(null); setSelectedItemSize('') }}
+                                      className="flex-1 px-2 py-2 bg-gray-400 hover:bg-gray-500 text-white rounded text-xs font-medium transition-colors"
+                                    >
+                                      Cancelar
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => { setSelectedItem(`${orderIdx}_${itemIdx}`); setSelectedItemSize('') }}
+                                  className="w-full text-left p-1 hover:bg-gray-100 dark:hover:bg-neutral-600 rounded transition-colors"
+                                >
+                                  <div className="text-xs text-gray-500 dark:text-gray-400">ID: <span className="font-semibold text-black dark:text-white">{item.expandedItem?.product_id || 'SIN ID'}</span></div>
+                                  <div className="text-sm font-semibold text-black dark:text-white">{item.expandedItem?.product_name || 'Producto'}</div>
+                                  <div className="text-xs text-gray-600 dark:text-gray-400">Precio: {formatCOP(item.expandedItem?.price || 0)}</div>
+                                  {item.expandedItem?.totalQty > 1 && (
+                                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Unidad {item.expandedItem?.unitNumber} de {item.expandedItem?.totalQty}</div>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-6 relative">
               {/* Panel Izquierdo: Búsqueda y Artículos */}
               <div className="bg-white dark:bg-neutral-800 rounded-lg border border-gray-200 dark:border-neutral-700 p-4 lg:col-span-1">
                 <h3 className="font-medium mb-3 text-black dark:text-white">Búsqueda de Artículos</h3>
@@ -467,7 +845,7 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
                 <div className="space-y-3">
                   {/* Artículos en Devolución */}
                   <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {devolutionList.map((dev, idx) => (
+                    {devolutionList.map((dev, _idx) => (
                       <div key={dev.id} className="p-2 rounded bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-900/40 text-xs">
                         <div className="flex justify-between items-start">
                           <div>
@@ -520,6 +898,159 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
               </div>
             </div>
           </>
+        )}
+
+        {/* Modal para ingresar datos del cliente */}
+        {showCustomerModal && (
+          <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
+            <div className="bg-white dark:bg-neutral-800 rounded-lg shadow-lg max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+              <h3 className="text-lg font-semibold mb-4 text-black dark:text-white">
+                Datos del Cliente
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                Ingresa los datos del cliente que realizará la compra con el valor a favor de la devolución.
+              </p>
+              
+              <div className="space-y-4">
+                {/* Tipo de Cliente */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Tipo de Cliente</label>
+                  <select
+                    value={customerForm.customer_type}
+                    onChange={e => setCustomerForm({...customerForm, customer_type: e.target.value})}
+                    className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="Persona">Persona</option>
+                    <option value="Empresa">Empresa</option>
+                  </select>
+                </div>
+
+                {/* Tipo y Número de Identificación */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Tipo Ident.</label>
+                    <select
+                      value={customerForm.identification_type}
+                      onChange={e => setCustomerForm({...customerForm, identification_type: e.target.value})}
+                      className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-xs text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {['NIT', 'CC', 'TI', 'Registro Civil', 'Tarjeta de extranjeria', 'Pasaporte', 'Documento de identificacion de extranjero', 'NUIP', 'PEP', 'Sin identificacion', 'NIT de otro pais', 'PPT', 'Salvaconducto'].map(t => <option key={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Número</label>
+                    <input
+                      type="text"
+                      value={customerForm.customer_id}
+                      onChange={e => setCustomerForm({...customerForm, customer_id: e.target.value})}
+                      placeholder="Identificación"
+                      autoFocus
+                      className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-xs text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Nombres y Apellidos - solo para Persona */}
+                {customerForm.customer_type === 'Persona' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Primer Nombre</label>
+                      <input
+                        type="text"
+                        value={customerForm.first_name}
+                        onChange={e => setCustomerForm({...customerForm, first_name: e.target.value})}
+                        className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-xs text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Segundo Nombre</label>
+                      <input
+                        type="text"
+                        value={customerForm.second_name}
+                        onChange={e => setCustomerForm({...customerForm, second_name: e.target.value})}
+                        className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-xs text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Primer Apellido</label>
+                      <input
+                        type="text"
+                        value={customerForm.last_name}
+                        onChange={e => setCustomerForm({...customerForm, last_name: e.target.value})}
+                        className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-xs text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Segundo Apellido</label>
+                      <input
+                        type="text"
+                        value={customerForm.second_last_name}
+                        onChange={e => setCustomerForm({...customerForm, second_last_name: e.target.value})}
+                        className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-xs text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Email */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Correo</label>
+                  <input
+                    type="email"
+                    value={customerForm.email}
+                    onChange={e => setCustomerForm({...customerForm, email: e.target.value})}
+                    className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-xs text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                {/* Indicativo y Celular */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Indicativo</label>
+                    <input
+                      type="text"
+                      value={customerForm.phone_indicative}
+                      onChange={e => setCustomerForm({...customerForm, phone_indicative: e.target.value})}
+                      className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-xs text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Celular</label>
+                    <input
+                      type="text"
+                      value={customerForm.phone_number}
+                      onChange={e => setCustomerForm({...customerForm, phone_number: e.target.value})}
+                      className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-xs text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+              
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => setShowCustomerModal(false)}
+                  className="flex-1 px-4 py-2 rounded bg-gray-300 dark:bg-neutral-600 text-gray-800 dark:text-white font-semibold hover:bg-gray-400 dark:hover:bg-neutral-500 transition-colors disabled:opacity-50"
+                  disabled={savingCustomer}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSaveCustomer}
+                  disabled={savingCustomer}
+                  className="flex-1 px-4 py-2 rounded border border-blue-600 dark:border-blue-400 text-blue-600 dark:text-blue-400 font-semibold hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {savingCustomer ? 'Guardando...' : 'Guardar Cliente'}
+                </button>
+                <button
+                  onClick={handleConfirmCustomerAndProceed}
+                  className="flex-1 px-4 py-2 rounded bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600 text-white font-semibold transition-colors disabled:opacity-50"
+                  disabled={savingCustomer}
+                >
+                  Continuar
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </main>
     </div>

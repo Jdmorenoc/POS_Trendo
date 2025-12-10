@@ -207,7 +207,7 @@ export default function App() {
       {view === 'configuracion' && <Configuracion onBack={() => setView('menu')} />}
       {view === 'cash' && <Cash onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />}
       {view === 'devoluciones' && <DevolucionesCaja onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />}
-      {view === 'payment' && <Payment onBack={() => setView('cash')} onNavigate={setView} />}
+      {view === 'payment' && <Payment onBack={() => setView('cash')} onLogout={handleLogout} onNavigate={setView} />}
       {view === 'contabilidad' && <Contabilidad onBack={() => setView('menu')} />}
       {view === 'menu' && (
         <Menu
