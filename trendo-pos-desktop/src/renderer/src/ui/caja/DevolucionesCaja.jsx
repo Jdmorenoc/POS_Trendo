@@ -469,7 +469,7 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
                 </button>
                 <h2 className="text-2xl font-semibold text-black dark:text-white">Compra con Crédito</h2>
               </div>
-              <button onClick={onLogout} className="px-3 py-2 bg-white dark:bg-neutral-800 text-gray-900 dark:text-gray-100 rounded border border-gray-300 dark:border-neutral-700 hover:bg-gray-100 dark:hover:bg-neutral-700">Cerrar sesión</button>
+              <button onClick={onLogout} className="px-3 py-2 rounded border border-red-200 dark:border-red-700/40 text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 transition">Cerrar sesión</button>
             </header>
 
             {/* Mostrar crédito disponible */}
@@ -628,7 +628,7 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
                 <h2 className="text-2xl font-semibold text-black dark:text-white">Devoluciones</h2>
                 <span className="text-xs px-2 py-1 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">Turno Activo</span>
               </div>
-              <button onClick={onLogout} className="px-3 py-2 bg-white dark:bg-neutral-800 text-gray-900 dark:text-gray-100 rounded border border-gray-300 dark:border-neutral-700 hover:bg-gray-100 dark:hover:bg-neutral-700">Cerrar sesión</button>
+              <button onClick={onLogout} className="px-3 py-2 rounded border border-red-200 dark:border-red-700/40 text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 transition">Cerrar sesión</button>
             </header>
 
             {/* Toast */}

@@ -40,7 +40,7 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
     m: '',
     l: '',
     xl: '',
-    gender: 'Unisex',
+    gender: 'Hombre',
     description: ''
   })
   const [showEditForm, setShowEditForm] = useState(false)
@@ -193,7 +193,7 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
       item: code,
       title: newProduct.title || 'Nuevo item',
       price: parsedPrice,
-      gender: newProduct.gender || 'Unisex',
+      gender: newProduct.gender || 'Hombre',
       description: newProduct.description,
       quantity: totalQuantity,
       deleted: 0,
@@ -230,7 +230,7 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
         m: '',
         l: '',
         xl: '',
-        gender: 'Unisex',
+        gender: 'Hombre',
         description: ''
       })
     } catch (error) {
@@ -255,7 +255,7 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
       l: item.l || 0,
       xl: item.xl || 0,
       description: item.description || '',
-      gender: item.gender || 'Unisex',
+      gender: item.gender || 'Hombre',
       item: item.item || ''
     })
     setShowEditForm(true)
@@ -300,7 +300,7 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
       item: code,
       title: rest.title || '',
       description: rest.description || '',
-      gender: rest.gender || 'Unisex',
+      gender: rest.gender || 'Hombre',
       price: priceNumber,
       quantity: totalQuantity,
       deleted: 0,
@@ -460,7 +460,6 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
                     onChange={e => setNewProduct({ ...newProduct, gender: e.target.value })}
                     className="mt-1 block w-full rounded-md border border-gray-300 dark:border-neutral-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-neutral-700 text-black dark:text-gray-100 text-sm"
                   >
-                    <option>Unisex</option>
                     <option>Hombre</option>
                     <option>Mujer</option>
                   </select>
@@ -696,7 +695,7 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
                   <div className="mt-4 border-t border-gray-200 dark:border-neutral-700 pt-4">
                     <div className="mb-3">
                       <div className="text-sm font-medium text-black dark:text-white">{itemLookupResult.title || '—'}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">ITEM: <span className="font-mono">{itemLookupResult.item}</span> • {itemLookupResult.gender || 'Unisex'}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">ITEM: <span className="font-mono">{itemLookupResult.item}</span> • {itemLookupResult.gender || 'Hombre'}</div>
                     </div>
                     <div className="grid grid-cols-5 gap-2">
                       {['xs','s','m','l','xl'].map(sz => {

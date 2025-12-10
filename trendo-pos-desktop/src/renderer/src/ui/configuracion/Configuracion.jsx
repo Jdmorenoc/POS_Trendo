@@ -15,6 +15,7 @@ export default function Configuracion({ onBack }) {
   const [sessionTimeout, setSessionTimeout] = useState(() => typeof window !== 'undefined' ? parseInt(window.localStorage.getItem('pref_session_timeout') || '30') : 30)
   const [autoLogoutEnabled, setAutoLogoutEnabled] = useState(() => typeof window !== 'undefined' && window.localStorage.getItem('pref_auto_logout') !== '0')
   const audioRef = useRef(null)
+  const fileInputRef = useRef(null)
 
   // Estado de usuario y perfil
   const [user, setUser] = useState(null)
@@ -26,6 +27,8 @@ export default function Configuracion({ onBack }) {
   const [editData, setEditData] = useState({
     displayName: '',
     email: '',
+    phone: '',
+    profileImage: '',
     newPassword: '',
     confirmPassword: '',
     currentPassword: ''
@@ -38,10 +41,16 @@ export default function Configuracion({ onBack }) {
         const { data: { user } } = await supabase.auth.getUser()
         if (user) {
           setUser(user)
+          console.log('Usuario cargado:', {
+            avatar_url: user.user_metadata?.avatar_url,
+            phone: user.user_metadata?.phone
+          })
           setEditData(prev => ({
             ...prev,
             displayName: user.user_metadata?.full_name || 'Usuario',
-            email: user.email || ''
+            email: user.email || '',
+            phone: user.user_metadata?.phone || '',
+            profileImage: user.user_metadata?.avatar_url || ''
           }))
         }
       } catch (e) {
@@ -53,6 +62,61 @@ export default function Configuracion({ onBack }) {
     loadUser()
   }, [])
 
+  // Función para abrir modal y recargar datos
+  async function openEditModal() {
+    setShowEditModal(true)
+    // Recargar datos del usuario para asegurar que tenemos la imagen más reciente
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        console.log('Recargando datos en modal:', {
+          avatar_url: user.user_metadata?.avatar_url,
+          has_image: !!user.user_metadata?.avatar_url
+        })
+        setEditData(prev => ({
+          ...prev,
+          displayName: user.user_metadata?.full_name || 'Usuario',
+          email: user.email || '',
+          phone: user.user_metadata?.phone || '',
+          profileImage: user.user_metadata?.avatar_url || ''
+        }))
+        setUser(user)
+      }
+    } catch (e) {
+      console.error('Error recargando usuario:', e)
+    }
+  }
+
+  // Función para cargar archivo de imagen
+  function handleImageFileSelect(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Validar tipo de archivo
+    if (!['image/jpeg', 'image/png'].includes(file.type)) {
+      setEditError('Por favor selecciona un archivo JPG o PNG')
+      return
+    }
+
+    // Validar tamaño (máximo 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      setEditError('La imagen no debe superar 2MB')
+      return
+    }
+
+    // Convertir a base64
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const base64String = event.target?.result
+      setEditData({ ...editData, profileImage: base64String })
+      setEditError('')
+    }
+    reader.onerror = () => {
+      setEditError('Error al cargar la imagen')
+    }
+    reader.readAsDataURL(file)
+  }
+
   // Guardar cambios de perfil
   async function handleSaveProfile() {
     setEditError('')
@@ -60,11 +124,25 @@ export default function Configuracion({ onBack }) {
     setEditLoading(true)
 
     try {
-      const updates = {}
+      const updates = { data: {} }
 
       // Actualizar nombre
       if (editData.displayName && editData.displayName !== (user?.user_metadata?.full_name || 'Usuario')) {
-        updates.data = { full_name: editData.displayName }
+        updates.data.full_name = editData.displayName
+      }
+
+      // Actualizar teléfono
+      if (editData.phone && editData.phone !== (user?.user_metadata?.phone || '')) {
+        updates.data.phone = editData.phone
+      }
+
+      // Actualizar imagen de perfil
+      if (editData.profileImage && editData.profileImage !== (user?.user_metadata?.avatar_url || '')) {
+        console.log('📸 Actualizando imagen de perfil:', {
+          esBase64: editData.profileImage.startsWith('data:'),
+          longitud: editData.profileImage.length
+        })
+        updates.data.avatar_url = editData.profileImage
       }
 
       // Actualizar email
@@ -88,7 +166,7 @@ export default function Configuracion({ onBack }) {
       }
 
       // Realizar actualización
-      if (Object.keys(updates).length === 0) {
+      if (Object.keys(updates.data).length === 0 && !updates.email && !updates.password) {
         setEditError('No hay cambios para guardar')
         setEditLoading(false)
         return
@@ -99,30 +177,41 @@ export default function Configuracion({ onBack }) {
       if (error) {
         setEditError(error.message || 'Error al guardar cambios')
       } else {
+        console.log('✅ Perfil actualizado en Supabase')
         setEditSuccess('Perfil actualizado correctamente')
         // Recargar usuario
         const { data: { user: updatedUser } } = await supabase.auth.getUser()
+        console.log('📥 Usuario actualizado:', {
+          avatar_url: updatedUser?.user_metadata?.avatar_url ? 'Presente' : 'No hay',
+          avatar_length: updatedUser?.user_metadata?.avatar_url?.length
+        })
         setUser(updatedUser)
+        
+        // Actualizar editData con los nuevos valores
+        setEditData(prev => ({
+          ...prev,
+          displayName: updatedUser?.user_metadata?.full_name || 'Usuario',
+          email: updatedUser?.email || '',
+          phone: updatedUser?.user_metadata?.phone || '',
+          profileImage: updatedUser?.user_metadata?.avatar_url || '',
+          newPassword: '',
+          confirmPassword: '',
+          currentPassword: ''
+        }))
         
         // Sincronizar cambios a tabla employee en Supabase
         try {
           await syncProfileChangesToEmployee({
             displayName: editData.displayName,
-            email: editData.email
+            email: editData.email,
+            phone: editData.phone,
+            avatar_url: editData.profileImage
           })
           console.log('✅ Cambios sincronizados a tabla employee')
         } catch (syncError) {
           console.error('⚠️ Error sincronizando a tabla employee:', syncError)
           // No mostrar error al usuario, pero loguear
         }
-        
-        // Limpiar campos de contraseña
-        setEditData(prev => ({
-          ...prev,
-          newPassword: '',
-          confirmPassword: '',
-          currentPassword: ''
-        }))
 
         // Cerrar modal después de 2 segundos
         setTimeout(() => {
@@ -300,8 +389,12 @@ export default function Configuracion({ onBack }) {
             {!loading && user ? (
               <div className="p-4 border border-gray-300 dark:border-neutral-700 rounded-lg bg-blue-50 dark:bg-blue-900/20">
                 <div className="flex items-center gap-4 mb-4">
-                  <div className="w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-lg">
-                    {user.user_metadata?.full_name?.[0]?.toUpperCase() || 'U'}
+                  <div className="w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-lg overflow-hidden flex-shrink-0">
+                    {user.user_metadata?.avatar_url ? (
+                      <img src={user.user_metadata.avatar_url} alt="Perfil" className="w-full h-full object-cover" />
+                    ) : (
+                      user.user_metadata?.full_name?.[0]?.toUpperCase() || 'U'
+                    )}
                   </div>
                   <div>
                     <div className="font-medium">{user.user_metadata?.full_name || 'Usuario'}</div>
@@ -309,7 +402,7 @@ export default function Configuracion({ onBack }) {
                   </div>
                 </div>
                 <button 
-                  onClick={() => setShowEditModal(true)}
+                  onClick={openEditModal}
                   className="w-full px-4 py-2 rounded-lg text-sm font-medium border border-blue-500 bg-white dark:bg-neutral-800 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
                 >
                   Editar Perfil
@@ -336,6 +429,42 @@ export default function Configuracion({ onBack }) {
               </div>
 
               <div className="space-y-4">
+                {/* Imagen de Perfil */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Foto de Perfil
+                  </label>
+                  <div className="flex gap-3 items-start">
+                    <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xl font-bold overflow-hidden flex-shrink-0">
+                      {editData.profileImage ? (
+                        <img src={editData.profileImage} alt="Perfil" className="w-full h-full object-cover" />
+                      ) : (
+                        user?.user_metadata?.full_name?.[0]?.toUpperCase() || 'U'
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/jpeg,image/png"
+                        onChange={handleImageFileSelect}
+                        className="hidden"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-full px-3 py-2 rounded-lg border-2 border-dashed border-gray-300 dark:border-neutral-600 bg-gray-50 dark:bg-neutral-700 text-gray-700 dark:text-gray-300 text-sm hover:bg-gray-100 dark:hover:bg-neutral-600 transition-colors font-medium"
+                      >
+                        📁 Seleccionar imagen
+                      </button>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">JPG o PNG • Máximo 2MB</p>
+                      {editData.profileImage && editData.profileImage.startsWith('data:') && (
+                        <p className="text-xs text-green-600 dark:text-green-400 mt-1">✓ Imagen cargada</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 {/* Nombre */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -358,6 +487,20 @@ export default function Configuracion({ onBack }) {
                     type="email"
                     value={editData.email}
                     onChange={(e) => setEditData({ ...editData, email: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                {/* Teléfono */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Número de celular
+                  </label>
+                  <input
+                    type="tel"
+                    placeholder="+57 3XX XXXXXXX"
+                    value={editData.phone}
+                    onChange={(e) => setEditData({ ...editData, phone: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>

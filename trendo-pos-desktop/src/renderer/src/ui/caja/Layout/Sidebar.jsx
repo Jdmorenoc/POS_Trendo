@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { supabase } from '@/services/supabaseClient'
 
 export function IconBox({ type }) {
   const common = 'w-4 h-4 stroke-current'
@@ -28,6 +29,22 @@ export default function SidebarCaja({ onNavigate, currentView, onLogout }) {
     if (typeof window === 'undefined') return false
     return window.localStorage.getItem('sidebar_caja_collapsed') === '1'
   })
+
+  const [user, setUser] = useState(null)
+
+  useEffect(() => {
+    async function loadUser() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          setUser(user)
+        }
+      } catch (err) {
+        console.warn('Error loading user:', err)
+      }
+    }
+    loadUser()
+  }, [])
 
   useEffect(() => {
     try {
@@ -85,6 +102,22 @@ export default function SidebarCaja({ onNavigate, currentView, onLogout }) {
       </nav>
 
       <div className="border-t border-gray-400 dark:border-neutral-800 p-3 mt-auto">
+        {/* User profile section */}
+        {user && (
+          <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-3'} p-3 mb-3 rounded-lg bg-gray-100 dark:bg-neutral-800`}>
+            <img
+              src={user.user_metadata?.avatar_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=default'}
+              alt="Profile"
+              className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+            />
+            {!collapsed && (
+              <span className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate">
+                {user.user_metadata?.full_name || user.email?.split('@')[0] || 'Usuario'}
+              </span>
+            )}
+          </div>
+        )}
+        
         <button
           onClick={onLogout}
           className={`w-full flex items-center ${collapsed ? 'gap-2 justify-center' : 'gap-4 justify-start'} px-6 py-3 text-sm font-medium rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 border border-red-200 dark:border-red-800 transition-colors`}
