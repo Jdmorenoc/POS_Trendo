@@ -10,15 +10,34 @@ import DevolucionesCaja from './caja/DevolucionesCaja'
 import Cash from './caja/Cash'
 import Contabilidad from './contabilidad/Contabilidad'
 import Payment from './caja/Payment'
+import InvoiceProgress from './caja/InvoiceProgress'
 import { supabase } from '@/services/supabaseClient'
 import { syncAll, onConnectivityChange } from '@/services/sync'
+import { fillMissingBillSizes } from '@/services/db-migration'
 import ResetPassword from './ResetPassword'
+
 
 export default function App() {
   const [user, setUser] = useState(null)
-  const [view, setView] = useState('loading') // 'login' | 'menu' | 'inventory' | 'cash'
+  const [view, setView] = useState('loading') // 'login' | 'menu' | 'inventory' | 'cash' | 'invoice-progress'
   const [authMessage, setAuthMessage] = useState('')
   const [showChatbot, setShowChatbot] = useState(false)
+  const [invoiceData, setInvoiceData] = useState(null) // Datos para InvoiceProgress
+  
+  // Ejecutar migración de campos size en bills históricos al inicio
+  useEffect(() => {
+    const runMigration = async () => {
+      try {
+        console.log('🚀 Ejecutando migración de datos...')
+        await fillMissingBillSizes()
+      } catch (error) {
+        console.error('⚠️ Error en migración (ignorado):', error)
+        // No bloquear la aplicación si falla la migración
+      }
+    }
+    runMigration()
+  }, [])
+  
   // Apply saved dark mode preference (class strategy)
   useEffect(() => {
     try {
@@ -47,6 +66,42 @@ export default function App() {
 
   useEffect(() => {
     async function boot() {
+      console.log('🚀 Boot iniciado - FORZANDO LOGIN')
+      console.log('Estado actual antes de limpiar:', { user, view })
+      
+      // SIEMPRE limpiar sesión anterior para forzar nuevo login
+      try {
+        if (typeof supabase?.auth?.signOut === 'function') {
+          await supabase.auth.signOut()
+          console.log('✅ Sesión Supabase limpiada')
+        }
+      } catch (e) {
+        console.warn('No se pudo cerrar sesión previa:', e)
+      }
+      
+      // SIEMPRE limpiar sesión local Y TODAS las claves de usuario
+      try {
+        if (typeof window !== 'undefined') {
+          // Limpiar específicamente mock_user
+          window.localStorage.removeItem('mock_user')
+          
+          // TAMBIÉN limpiar otras posibles claves de sesión
+          const keysToRemove = []
+          for (let i = 0; i < window.localStorage.length; i++) {
+            const key = window.localStorage.key(i)
+            if (key && (key.includes('user') || key.includes('session') || key.includes('auth') || key.includes('token'))) {
+              keysToRemove.push(key)
+            }
+          }
+          keysToRemove.forEach(key => window.localStorage.removeItem(key))
+          
+          console.log('✅ Sesión local limpiada (y claves relacionadas):', keysToRemove)
+          console.log('localStorage después de limpiar:', Object.keys(window.localStorage))
+        }
+      } catch (e) {
+        console.warn('No se pudo limpiar sesión local:', e)
+      }
+
       // First: check URL for recovery / error params and handle them before session check
       try {
         if (typeof window !== 'undefined') {
@@ -63,6 +118,7 @@ export default function App() {
           if (error || error_description) {
             const msg = decodeURIComponent(error_description || error || '')
             setAuthMessage(msg || 'Error al procesar el enlace de recuperación')
+            setUser(null)
             setView('login')
             try { window.history.replaceState({}, document.title, window.location.pathname + window.location.search) } catch {}
             return
@@ -81,46 +137,24 @@ export default function App() {
           }
         }
       } catch (e) { /* ignore */ }
+      
+      // 🔓 SIEMPRE mostrar login sin verificar sesión anterior
+      console.log('✅ Mostrando pantalla de login')
+      console.log('Estableciendo: user=null, view=login')
+      setUser(null)
+      setView('login')
+      console.log('✅ Boot completado - usuario debe ver Login')
+      console.log('Si ves el menu en lugar de Login, hay un problema en el renderizado o el estado está siendo modificado después de boot()')
+      
+      // subscribe to auth changes - DESACTIVADO en modo local para forzar login
+      // El listener causaba que se restauraran sesiones previas
       try {
-        if (supabase?.auth?.getSession) {
-          const { data } = await supabase.auth.getSession()
-          const sess = data?.session
-          const nowSec = Math.floor(Date.now() / 1000)
-          const expired = sess && sess.expires_at && Number(sess.expires_at) <= nowSec
-          if (sess && sess.user && !expired) {
-            setUser(sess.user)
-            setView('menu')
-          } else {
-            // No valid session: ensure Supabase clears any stored session and show login
-            try { if (typeof supabase?.auth?.signOut === 'function') await supabase.auth.signOut() } catch {}
-            try { if (typeof window !== 'undefined') window.localStorage.removeItem('mock_user') } catch {}
-            setUser(null)
-            setView('login')
-          }
-          // subscribe to auth changes - SOLO para logout o cambios de sesión real
-          supabase.auth.onAuthStateChange((_event, session) => {
-            if (session?.user) {
-              setUser(session.user)
-              // NO cambiar la vista aquí - mantener donde estaba
-            } else {
-              // Clear any local session and force login view
-              try { if (typeof window !== 'undefined') window.localStorage.removeItem('mock_user') } catch {}
-              setUser(null)
-              setView('login')
-            }
-          })
-        } else {
-          // Fallback: mock session from localStorage
-          const mock = JSON.parse((typeof window !== 'undefined' ? window.localStorage.getItem('mock_user') : 'null') || 'null')
-          if (mock) {
-            setUser(mock)
-            setView('menu')
-          } else {
-            setView('login')
-          }
+        if (typeof supabase?.auth?.onAuthStateChange === 'function') {
+          // NO activar el listener en modo local
+          // supabase.auth.onAuthStateChange(...)
         }
-      } catch {
-        setView('login')
+      } catch (e) {
+        console.warn('No se pudo configurar listener de autenticación:', e)
       }
     }
     boot()
@@ -130,16 +164,32 @@ export default function App() {
   // Ahora solo verificamos sesión en boot() y onAuthStateChange()
 
   function handleAuthenticated(u) {
+    console.log('✅ Usuario autenticado:', u?.email)
     if (!supabase?.auth && typeof window !== 'undefined') {
+      // Modo local: guardar usuario en localStorage
       window.localStorage.setItem('mock_user', JSON.stringify(u))
+      console.log('💾 Sesión local guardada')
     }
     setUser(u)
     setView('menu')
   }
 
   async function handleLogout() {
-  try { if (supabase?.auth?.signOut) await supabase.auth.signOut() } catch { /* ignore */ }
-  if (typeof window !== 'undefined') window.localStorage.removeItem('mock_user')
+    console.log('🔓 Cerrando sesión...')
+    // Limpiar sesión local
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem('mock_user')
+      console.log('🗑️ Sesión local limpiada')
+    }
+    // Intentar cerrar sesión en Supabase si está disponible
+    try {
+      if (typeof supabase?.auth?.signOut === 'function') {
+        await supabase.auth.signOut()
+        console.log('✅ Sesión Supabase cerrada')
+      }
+    } catch (e) {
+      console.warn('No se pudo cerrar sesión Supabase:', e)
+    }
     setUser(null)
     setView('login')
   }
@@ -161,7 +211,7 @@ export default function App() {
       if (navigator.onLine) {
         syncAll()
       }
-    }, 30_000)
+    }, 60_000) // Reducir frecuencia de sync: cada 60s en lugar de 30s
 
     const unsubscribe = typeof onConnectivityChange === 'function'
       ? onConnectivityChange(() => { if (navigator.onLine) syncAll() })
@@ -173,32 +223,16 @@ export default function App() {
     }
   }, [user])
 
-  // Verifica que el useEffect esté así (SIN setView('menu')):
-  useEffect(() => {
-    const checkSession = async () => {
-      try {
-        const { data: { session }, error } = await supabase.auth.getSession()
-        if (error) throw error
-        
-        if (session?.user) {
-          // ✅ Solo actualiza usuario, NO cambia la vista
-          setUser(session.user)
-        } else {
-          setView('login')
-        }
-      } catch (err) {
-        console.error('❌ Error verificando sesión:', err)
-        setView('login')
-      }
-    }
-
-    // Solo ejecuta una vez al cargar la app
-    checkSession()
-  }, []) // ⬅️ Array vacío - NO incluye [view]
-
   if (view === 'loading') return null
   if (view === 'reset') return <ResetPassword onDone={() => setView('login')} />
-  if (!user || view === 'login') return <Login onAuthenticated={handleAuthenticated} initialInfo={authMessage} />
+  
+  // ⚠️ DEBUG: Revisar por qué no entra en Login
+  if (!user || view === 'login') {
+    console.log('✅ Renderizando Login - user:', user, 'view:', view)
+    return <Login onAuthenticated={handleAuthenticated} initialInfo={authMessage} />
+  }
+  
+  console.log('❌ RENDERIZANDO MENU CON USER:', user?.email || user, '- VIEW:', view)
   
   return (
     <>
@@ -207,7 +241,23 @@ export default function App() {
       {view === 'configuracion' && <Configuracion onBack={() => setView('menu')} />}
       {view === 'cash' && <Cash onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />}
       {view === 'devoluciones' && <DevolucionesCaja onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />}
-      {view === 'payment' && <Payment onBack={() => setView('cash')} onLogout={handleLogout} onNavigate={setView} />}
+      {view === 'payment' && <Payment onBack={() => setView('cash')} onLogout={handleLogout} onNavigate={(nextView, data) => {
+        if (nextView === 'invoice-progress') {
+          setInvoiceData(data)
+          setView('invoice-progress')
+        } else {
+          setView(nextView)
+        }
+      }} />}
+      {view === 'invoice-progress' && <InvoiceProgress 
+        saleData={invoiceData?.saleData} 
+        invoiceType={invoiceData?.invoiceType}
+        onBack={() => setView('cash')} 
+        onFinish={() => {
+          setInvoiceData(null)
+          setView('cash')
+        }} 
+      />}
       {view === 'contabilidad' && <Contabilidad onBack={() => setView('menu')} />}
       {view === 'menu' && (
         <Menu

@@ -24,8 +24,12 @@ Crea un archivo `.env` en la raíz con:
 
 ```
 VITE_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
-VITE_SUPABASE_ANON_KEY=YOUR_ANON_PUBLIC_KEY
+VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY=YOUR_PUBLISHABLE_KEY
+# Opcional: fuerza modo sin Supabase (útil para pruebas locales)
+# VITE_USE_LOCAL_ONLY=true
 ```
+
+> **Nota:** `VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY` reemplaza al antiguo `VITE_SUPABASE_ANON_KEY`. Si todavía usas el nombre viejo, la aplicación lo tomará como respaldo, pero se recomienda actualizar tu `.env`.
 
 ## Scripts
 

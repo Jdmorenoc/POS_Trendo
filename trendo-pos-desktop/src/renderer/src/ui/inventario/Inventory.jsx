@@ -8,6 +8,7 @@ import { liveQuery } from 'dexie'
 import Sidebar from './Layout/Sidebar'
 import Header from './Layout/Header'
 import Footer from './Layout/Footer'
+import ImportProductsModal from './ImportProductsModal'
 
 // Longitud máxima permitida para el código ITEM (SKU)
 const MAX_SKU = 15
@@ -31,6 +32,7 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
     [items]
   )
   const [showAddForm, setShowAddForm] = useState(false)
+  const [showImportModal, setShowImportModal] = useState(false)
   const [newProduct, setNewProduct] = useState({
     item: '',
     title: '',
@@ -85,8 +87,9 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
   useEffect(() => {
     syncAll()
     const off = watchRealtime()
-    const id = setInterval(() => syncAll(), 15_000)
-    const offConn = onConnectivityChange(() => { if (navigator.onLine) syncAll() })
+    // En modo local no ejecutamos sincronizaciones automáticas con la nube
+    const id = setInterval(() => { /* sync desactivado */ }, 60_000)
+    const offConn = onConnectivityChange(() => { /* sync desactivado en modo local */ })
     return () => { off(); offConn(); clearInterval(id) }
   }, [])
 
@@ -131,7 +134,7 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
     if (delta < 0 && current + delta < 0) { setAdjustError(`Stock insuficiente en ${size.toUpperCase()} (actual ${current})`); return }
     try {
       await adjustStockByItem(code, size, delta)
-      if (navigator.onLine) await syncAll()
+      // En modo local no intentamos sincronizar con la nube
       setShowAdjustForm(false)
     } catch {
       setAdjustError('Error al ajustar stock')
@@ -201,25 +204,8 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
     }
 
     try {
-      if (navigator.onLine) {
-        const nowIso = new Date().toISOString()
-        const cloudPayload = {
-          ...baseProduct,
-          deleted: false,
-          updated_at: nowIso
-        }
-        let saved = await insertProductToCloud(cloudPayload)
-        saved = saved || cloudPayload
-        await upsertItem({
-          ...baseProduct,
-          ...saved,
-          deleted: saved.deleted ? 1 : 0,
-          dirty: 0
-        })
-        await syncAll()
-      } else {
-        await upsertItem({ ...baseProduct, dirty: 1 })
-      }
+      // ⚠️ MODO LOCAL: Siempre guardar localmente, nunca a Supabase
+      await upsertItem({ ...baseProduct, dirty: 1 })
       setShowAddForm(false)
       setNewProduct({
         item: '',
@@ -240,6 +226,74 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
           ? 'ITEM ya existe en la base de datos'
           : 'No se pudo guardar el producto en la base de datos'
       setErrorAdd(message)
+    }
+  }
+
+  async function handleImportProducts(importedProducts) {
+    try {
+      let successCount = 0
+      let errorCount = 0
+
+      for (const product of importedProducts) {
+        try {
+          const rawCode = product.item ?? product.ITEM ?? product.code ?? product.codigo ?? ''
+          const code = String(rawCode).trim()
+          if (!code) {
+            console.warn('Producto sin ITEM identificado, se omite', product)
+            errorCount++
+            continue
+          }
+
+          const existing = await findItemByCode(code)
+          const recordId = existing?.id || code
+          const gender = (product.gender || product.gender_prod || existing?.gender || 'Hombre').trim()
+          const rawPrice = product.price ?? product.precio ?? existing?.price ?? 0
+          const priceNumber = (() => {
+            const parsed = typeof rawPrice === 'number' ? rawPrice : parseCOP(String(rawPrice))
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : (existing?.price || 0)
+          })()
+
+          const normalizeStockValue = value => Math.max(0, parseInt(value, 10) || 0)
+          const normalizedStock = {
+            xs: normalizeStockValue(product.xs ?? product.stock_xs ?? existing?.xs ?? 0),
+            s: normalizeStockValue(product.s ?? product.stock_s ?? existing?.s ?? 0),
+            m: normalizeStockValue(product.m ?? product.stock_m ?? existing?.m ?? 0),
+            l: normalizeStockValue(product.l ?? product.stock_l ?? existing?.l ?? 0),
+            xl: normalizeStockValue(product.xl ?? product.stock_xl ?? existing?.xl ?? 0)
+          }
+          const totalQuantity = SIZES.reduce((sum, size) => sum + normalizedStock[size], 0)
+
+          const baseProduct = {
+            id: recordId,
+            item: code,
+            title: (product.title || product.nombre || existing?.title || '').toString().trim(),
+            description: (product.description || product.descripcion || existing?.description || '').toString(),
+            gender,
+            price: priceNumber,
+            quantity: totalQuantity,
+            deleted: 0,
+            ...normalizedStock
+          }
+
+          await upsertItem({ ...baseProduct, dirty: 1 })
+          successCount++
+        } catch (err) {
+          console.error('Error importando producto:', product.item, err)
+          errorCount++
+        }
+      }
+
+      // En modo local no ejecutamos sincronización con la nube
+
+      setShowImportModal(false)
+      // Toast o notificación
+      if (successCount > 0) {
+        setErrorAdd(`✓ Se importaron ${successCount} producto${successCount !== 1 ? 's' : ''}${errorCount > 0 ? ` (${errorCount} errores)` : ''}`)
+        setTimeout(() => setErrorAdd(''), 3000)
+      }
+    } catch (error) {
+      console.error('Error general en importación:', error)
+      setErrorAdd('Error en la importación. Intenta nuevamente.')
     }
   }
 
@@ -275,7 +329,13 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
       return
     }
     const existing = await findItemByCode(code)
-    if (existing && existing.id !== id) {
+    const originalCodeLower = (originalItem || '').trim().toLowerCase()
+    const currentIdLower = (id || '').trim().toLowerCase()
+    const isSameRecord = existing && (
+      (existing.id && String(existing.id).trim().toLowerCase() === currentIdLower) ||
+      (existing.item && String(existing.item).trim().toLowerCase() === originalCodeLower)
+    )
+    if (existing && !isSameRecord) {
       setErrorEdit('ITEM ya existe, elige otro código')
       return
     }
@@ -295,8 +355,12 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
       return
     }
 
+    const normalizedCode = code.toLowerCase()
+    const hasCodeChanged = originalCodeLower && originalCodeLower !== normalizedCode
+    const recordId = hasCodeChanged ? code : (id || code)
+
     const localRecord = {
-      id: code,
+      id: recordId,
       item: code,
       title: rest.title || '',
       description: rest.description || '',
@@ -308,40 +372,13 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
     }
 
     try {
-      if (navigator.onLine) {
-        const nowIso = new Date().toISOString()
-        const cloudPayload = {
-          ...localRecord,
-          product_name: localRecord.title,
-          nombre: localRecord.title,
-          stock_xs: localRecord.xs,
-          stock_s: localRecord.s,
-          stock_m: localRecord.m,
-          stock_l: localRecord.l,
-          stock_xl: localRecord.xl,
-          updated_at: nowIso,
-          deleted: false
-        }
-        const cloudResult = await insertProductToCloud(cloudPayload)
-        if (cloudResult?.success === false) {
-          throw new Error(cloudResult.error || 'Supabase rechazó la actualización')
-        }
-        await upsertItem({ ...localRecord, dirty: 0 })
-      } else {
-        await upsertItem({ ...localRecord, dirty: 1 })
+      // ⚠️ MODO LOCAL: Siempre guardar localmente, nunca a Supabase
+      await upsertItem({ ...localRecord, dirty: 1 })
+
+      if (hasCodeChanged && id && id !== recordId) {
+        await markDeleted(id)
       }
 
-      const originalCloudKey = originalItem || id
-      if (originalCloudKey && originalCloudKey !== code) {
-        if (navigator.onLine) {
-          await deleteProductFromCloud(originalCloudKey).catch(err => console.warn('No se pudo eliminar en nube', err))
-          await removeItem(id).catch(err => console.warn('No se pudo eliminar local antiguo', err))
-        } else {
-          await markDeleted(id)
-        }
-      }
-
-      if (navigator.onLine) await syncAll()
       setShowEditForm(false)
       setEditing(null)
     } catch (error) {
@@ -415,7 +452,13 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
           <div className="flex items-center justify-between">
             <div className="text-sm text-gray-600 dark:text-gray-300">Gestiona el catálogo de productos de la tienda</div>
             <div className="flex items-center gap-3">
-              <button className="px-3 py-2 text-sm rounded-md border border-gray-400 hover:bg-green-600 bg-white text-gray-700 hover:text-white items-center gap-2" title="Importar Excel">Importar Excel</button>
+              <button 
+                onClick={() => setShowImportModal(true)}
+                className="px-3 py-2 text-sm rounded-md border border-gray-400 hover:bg-green-600 bg-white text-gray-700 hover:text-white items-center gap-2"
+                title="Importar productos desde Excel"
+              >
+                📥 Importar Excel
+              </button>
               <button
                 onClick={addItem}
                 className="px-4 py-2 text-sm rounded-md bg-black text-white hover:bg-gray-900 flex items-center gap-2"
@@ -936,6 +979,12 @@ export default function Inventory({ onBack, onLogout, onNavigate }) {
             </form>
           </div>
         )}
+
+        <ImportProductsModal
+          isOpen={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          onImport={handleImportProducts}
+        />
 
         <div className="mt-auto">
           <Footer compact />

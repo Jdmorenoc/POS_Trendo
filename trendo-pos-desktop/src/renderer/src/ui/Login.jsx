@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { onConnectivityChange } from '@/services/sync'
-import { loginWithEmail, registerWithEmail, VALID_ROLES, sendPasswordRecovery } from '@/services/authLogin'
+import { loginWithEmail, registerWithEmail, VALID_ROLES, sendPasswordRecovery, resetPasswordWithToken } from '@/services/authLogin'
 import { syncSingleAuthUserToEmployee } from '@/services/employees'
 
 function WifiIcon({ className = 'w-4 h-4' }) {
@@ -62,7 +62,7 @@ export default function Login({ onAuthenticated, initialInfo = '' }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const [mode, setMode] = useState('login') // or 'register'
+  const [mode, setMode] = useState('login') // or 'register', 'recover', 'recover-confirm'
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -73,8 +73,14 @@ export default function Login({ onAuthenticated, initialInfo = '' }) {
   const [secondLastName, setSecondLastName] = useState('')
   const [documentId, setDocumentId] = useState('')
   const [phone, setPhone] = useState('')
+  const [recoveryToken, setRecoveryToken] = useState('')
+  const [recoveryEmail, setRecoveryEmail] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState('')
 
   const isRegister = mode === 'register'
+  const isRecover = mode === 'recover'
+  const isRecoverConfirm = mode === 'recover-confirm'
 
   function switchMode(nextMode) {
     setMode(nextMode)
@@ -104,9 +110,31 @@ export default function Login({ onAuthenticated, initialInfo = '' }) {
       if (mode === 'recover') {
         // Enviar correo de recuperación
         const res = await sendPasswordRecovery(email)
+        if (res.isLocal && res.token) {
+          // Modo local: mostrar el token y cambiar a modo de confirmación
+          setRecoveryToken(res.token)
+          setRecoveryEmail(email)
+          setInfo(`Token de recuperación: ${res.token}\n\nCopia este token, ingresa tu correo y nueva contraseña en la siguiente pantalla.`)
+          switchMode('recover-confirm')
+          return
+        }
         setInfo(res?.message || 'Correo enviado. Revisa tu bandeja.')
         // Volver a login después de notificar
         switchMode('login')
+        return
+      }
+
+      if (mode === 'recover-confirm') {
+        // Cambiar contraseña con token
+        if (!email) throw new Error('Correo requerido')
+        if (!recoveryToken) throw new Error('Token requerido')
+        if (!newPassword) throw new Error('Nueva contraseña requerida')
+        if (newPassword !== newPasswordConfirm) throw new Error('Las contraseñas no coinciden')
+        if (newPassword.length < 6) throw new Error('La contraseña debe tener al menos 6 caracteres')
+        
+        const res = await resetPasswordWithToken(email, recoveryToken, newPassword)
+        setInfo(res?.message || 'Contraseña actualizada. Ahora puedes iniciar sesión.')
+        setTimeout(() => switchMode('login'), 1500)
         return
       }
 
@@ -130,14 +158,18 @@ export default function Login({ onAuthenticated, initialInfo = '' }) {
         return
       }
 
-      // 🔄 Sincronizar usuario a tabla employee después del login exitoso
-      if (result) {
+      // 🔄 Sincronizar usuario a tabla employee SOLO si es registro en línea (no local)
+      // En modo local, NO esperar la sincronización (hacerla en background sin bloquear)
+      if (isRegister && result && !result.isLocal) {
         try {
           console.log('🔄 Sincronizando usuario a tabla trendo.employee...')
-          await syncSingleAuthUserToEmployee()
-          console.log('✅ Usuario sincronizado exitosamente a tabla employee')
+          // NO ESPERAR - hacer en background
+          syncSingleAuthUserToEmployee().catch(syncError => {
+            console.warn('⚠️ Advertencia: No se pudo sincronizar a tabla employee:', syncError.message)
+          })
+          console.log('✅ Sincronización iniciada en background')
         } catch (syncError) {
-          console.warn('⚠️ Advertencia: No se pudo sincronizar a tabla employee:', syncError.message)
+          console.warn('⚠️ Error al iniciar sincronización:', syncError.message)
           // No fallar el login si falla la sincronización
         }
       }
@@ -295,13 +327,14 @@ export default function Login({ onAuthenticated, initialInfo = '' }) {
           )}
 
           {error && <div className="text-sm text-red-600">{error}</div>}
-          {!error && info && <div className="text-sm text-blue-600 dark:text-blue-300">{info}</div>}
+          {!error && info && <div className="text-sm text-blue-600 dark:text-blue-300 whitespace-pre-wrap">{info}</div>}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2 rounded bg-black text-white font-semibold hover:bg-gray-900 disabled:opacity-60"
+            className="w-full py-2 rounded bg-black text-white font-semibold hover:bg-gray-900 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
+            {loading && <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
             {loading ? (isRegister ? 'Creando cuenta…' : 'Iniciando…') : (isRegister ? 'Crear cuenta' : 'Iniciar sesión')}
           </button>
         </form>
@@ -322,33 +355,118 @@ export default function Login({ onAuthenticated, initialInfo = '' }) {
         {/* Recuperación: si está en modo recover mostramos un pequeño form alterno */}
         {mode === 'recover' && (
           <div className="mt-4 w-full max-w-[92vw]">
-            <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">Introduce tu correo para recibir el enlace de recuperación.</div>
-            <form onSubmit={handleSubmit} className="flex gap-2">
+            <h3 className="text-lg font-semibold mb-2">Recuperar contraseña</h3>
+            <div className="text-sm text-gray-600 dark:text-gray-400 mb-4">Introduce tu correo para recibir un token de recuperación.</div>
+            
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm mb-1">Correo Electrónico</label>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-3 py-2 rounded border bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 outline-none focus:ring-2 focus:ring-blue-400"
+                  placeholder="tu@correo.com"
+                />
+              </div>
+
+              {error && <div className="text-sm text-red-600 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded p-3">{error}</div>}
+              {!error && info && <div className="text-sm text-blue-600 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded p-3 whitespace-pre-line">{info}</div>}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full px-3 py-2 rounded bg-black text-white font-semibold hover:bg-gray-900 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {loading && <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                {loading ? 'Enviando…' : 'Enviar Token'}
+              </button>
+            </form>
+
+            <div className="mt-4">
+              <button
+                className="text-blue-600 hover:underline text-sm"
+                onClick={() => switchMode('login')}
+              >
+                ← Volver a login
+              </button>
+            </div>
+          </div>
+        )}
+
+        {mode === 'recover-confirm' && (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded p-3 text-sm text-blue-700 dark:text-blue-300">
+              <strong>Recuperación de Contraseña</strong><br/>
+              <span className="text-xs">Ingresa tu correo, el token recibido y tu nueva contraseña.</span>
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1">Correo Electrónico</label>
               <input
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="flex-1 px-3 py-2 rounded border bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 outline-none focus:ring-2 focus:ring-blue-400"
+                className="w-full px-3 py-2 rounded border bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 outline-none focus:ring-2 focus:ring-blue-400"
                 placeholder="tu@correo.com"
               />
-              <button
-                type="submit"
-                disabled={loading}
-                className="px-3 py-2 rounded bg-black text-white font-semibold hover:bg-gray-900 disabled:opacity-60"
-              >
-                {loading ? 'Enviando…' : 'Enviar'}
-              </button>
-            </form>
-            <div className="mt-2 text-xs text-gray-500">
-              <button
-                className="px-3 py-2 rounded bg-black text-white font-semibold hover:bg-gray-900"
-                onClick={() => switchMode('login')}
-              >
-                Volver
-              </button>
             </div>
-          </div>
+
+            <div>
+              <label className="block text-sm mb-1">Token de Recuperación</label>
+              <input
+                type="text"
+                required
+                value={recoveryToken}
+                onChange={(e) => setRecoveryToken(e.target.value)}
+                className="w-full px-3 py-2 rounded border bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 outline-none focus:ring-2 focus:ring-blue-400 font-mono text-xs"
+                placeholder="Pega el token aquí"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1">Nueva Contraseña</label>
+              <input
+                type="password"
+                required
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                className="w-full px-3 py-2 rounded border bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 outline-none focus:ring-2 focus:ring-blue-400"
+                placeholder="Nueva contraseña (mínimo 6 caracteres)"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1">Confirmar Contraseña</label>
+              <input
+                type="password"
+                required
+                value={newPasswordConfirm}
+                onChange={(e) => setNewPasswordConfirm(e.target.value)}
+                className="w-full px-3 py-2 rounded border bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 outline-none focus:ring-2 focus:ring-blue-400"
+                placeholder="Repite la contraseña"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-2 rounded bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {loading && <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+              {loading ? 'Cambiando…' : 'Cambiar Contraseña'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => switchMode('login')}
+              className="w-full py-2 rounded border border-gray-300 dark:border-neutral-600 text-gray-700 dark:text-gray-300 font-semibold hover:bg-gray-50 dark:hover:bg-neutral-700"
+            >
+              Volver
+            </button>
+          </form>
         )}
       </div>
 

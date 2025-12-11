@@ -15,20 +15,25 @@ import {
   bulkUpsertBills
 } from './db'
 
-const SUPABASE_SCHEMA = 'trendo'
+// ⏱️ THROTTLE: Evitar que syncAll se ejecute demasiadas veces
+let lastSyncTime = 0
+const SYNC_THROTTLE_MS = 60_000 // Esperar 60 segundos entre syncs completos
+let isSyncing = false
+
+const SUPABASE_SCHEMA = 'public'
 const SUPABASE_TABLE = 'product'
 const REMOTE_TABLE = `${SUPABASE_SCHEMA}.${SUPABASE_TABLE}`
-const LAST_SYNC_KEY = 'trendo.product:lastSyncedAt'
+const LAST_SYNC_KEY = 'public.product:lastSyncedAt'
 const SIZE_FIELDS = ['xs', 's', 'm', 'l', 'xl']
 const CUSTOMER_TABLE = 'customer'
 const CUSTOMER_REMOTE_TABLE = `${SUPABASE_SCHEMA}.${CUSTOMER_TABLE}`
-const CUSTOMER_LAST_SYNC_KEY = 'trendo.customer:lastSyncedAt'
+const CUSTOMER_LAST_SYNC_KEY = 'public.customer:lastSyncedAt'
 const SALE_TABLE = 'sale'
 const SALE_REMOTE_TABLE = `${SUPABASE_SCHEMA}.${SALE_TABLE}`
-const SALE_LAST_SYNC_KEY = 'trendo.sale:lastSyncedAt'
+const SALE_LAST_SYNC_KEY = 'public.sale:lastSyncedAt'
 const BILL_TABLE = 'bill'
 const BILL_REMOTE_TABLE = `${SUPABASE_SCHEMA}.${BILL_TABLE}`
-const BILL_LAST_SYNC_KEY = 'trendo.bill:lastSyncedAt'
+const BILL_LAST_SYNC_KEY = 'public.bill:lastSyncedAt'
 
 const ensureSize = (value) => {
   const parsed = Number.parseInt(value, 10)
@@ -161,7 +166,9 @@ function mapBillLocalToCloud(bill) {
     sale_consecutive: saleConsecutive,
     buy_consecutive: bill.buy_consecutive ? parseInt(bill.buy_consecutive) : null,
     product_id: bill.product_id ? String(bill.product_id) : null,
-    customer_document: bill.customer_document && bill.customer_document.trim() ? String(bill.customer_document) : null
+    customer_document: bill.customer_document && bill.customer_document.trim() ? String(bill.customer_document) : null,
+    product_name: bill.product_name ? String(bill.product_name) : null,
+    size: bill.size ? String(bill.size).toLowerCase() : null
   }
 }
 
@@ -260,83 +267,97 @@ function remoteTable() {
   return supabase.schema(SUPABASE_SCHEMA).from(SUPABASE_TABLE)
 }
 
-function remoteSaleTable() {
-  return supabase.schema(SUPABASE_SCHEMA).from(SALE_TABLE)
-}
-
 export async function pullFromCloud() {
-  const { data, error } = await remoteTable().select('*')
-  if (error) throw error
-
-  const incoming = (data || []).map(mapIncoming)
-  if (incoming.length > 0) {
-    await bulkUpsert(incoming)
-  }
-
-  await setMeta(LAST_SYNC_KEY, new Date().toISOString())
-  return incoming.length
+  // ⏸️ DESACTIVADO EN MODO LOCAL
+  return 0
 }
 
 export async function pushToCloud() {
-  const dirty = await getDirty()
-  if (dirty.length === 0) return 0
-
-  const deletions = dirty.filter((item) => item.deleted === 1 || item.deleted === true)
-  const updates = dirty.filter((item) => !deletions.includes(item))
-
-  if (deletions.length) {
-    const remoteIds = deletions
-      .map((item) => String(item.item || item.id || '').trim())
-      .filter((value) => value.length > 0)
-
-    const localIds = deletions
-      .map((item) => item.id)
-      .filter((value) => typeof value !== 'undefined')
-
-    if (remoteIds.length) {
-      const { error: deleteError } = await remoteTable()
-        .delete()
-        .in('product_id', remoteIds)
-
-      if (deleteError) throw deleteError
-    }
-
-    if (localIds.length) {
-      await db.items.bulkDelete(localIds)
-    }
-  }
-
-  if (updates.length) {
-    const toUpsert = updates.map(mapLocalToCloud)
-    const { error } = await remoteTable().upsert(toUpsert, { onConflict: 'product_id' })
-    if (error) throw error
-
-    await markClean(updates.map((item) => item.id))
-  }
-
-  return updates.length + deletions.length
+  // ⏸️ DESACTIVADO EN MODO LOCAL
+  return 0
 }
+
+/* PUSH A SUPABASE - COMENTARIZADA
+export async function pushToCloud() {
+  try {
+    const dirty = await getDirty()
+    if (dirty.length === 0) {
+      console.log('✓ No hay productos sin sincronizar')
+      return 0
+    }
+
+    console.log(`📨 Sincronizando ${dirty.length} producto(s) a Supabase...`)
+
+    const deletions = dirty.filter((item) => item.deleted === 1 || item.deleted === true)
+    const updates = dirty.filter((item) => !deletions.includes(item))
+
+    if (deletions.length) {
+      const remoteIds = deletions
+        .map((item) => String(item.item || item.id || '').trim())
+        .filter((value) => value.length > 0)
+
+      const localIds = deletions
+        .map((item) => item.id)
+        .filter((value) => typeof value !== 'undefined')
+
+      if (remoteIds.length) {
+        console.log(`🗑️ Eliminando ${remoteIds.length} producto(s) de Supabase...`)
+        const { error: deleteError } = await supabase
+          .from('product')
+          .delete()
+          .in('product_id', remoteIds)
+
+        if (deleteError) {
+          console.error('❌ Error eliminando productos:', deleteError)
+          throw deleteError
+        }
+        console.log(`✅ ${remoteIds.length} producto(s) eliminado(s)`)
+      }
+
+      if (localIds.length) {
+        await db.items.bulkDelete(localIds)
+      }
+    }
+
+    if (updates.length) {
+      console.log(`📝 Subiendo ${updates.length} producto(s)...`)
+      const toUpsert = updates.map(mapLocalToCloud)
+      const { error, data } = await supabase
+        .from('product')
+        .upsert(toUpsert, { onConflict: 'product_id' })
+
+      if (error) {
+        console.error('❌ Error subiendo productos:', error)
+        throw error
+      }
+      
+      console.log(`✅ ${updates.length} producto(s) sincronizado(s)`)
+      await markClean(updates.map((item) => item.id))
+    }
+
+    return updates.length + deletions.length
+  } catch (error) {
+    console.error('❌ Error en pushToCloud:', error)
+    return 0
+  }
+}
+*/
 
 function remoteCustomerTable() {
   return supabase.schema(SUPABASE_SCHEMA).from(CUSTOMER_TABLE)
 }
 
 export async function pullCustomersFromCloud() {
-  const { data, error } = await remoteCustomerTable().select('*')
-  if (error) throw error
-
-  const incoming = (data || [])
-    .map(mapCustomerIncoming)
-    .filter((record) => Boolean(record?.id))
-
-  if (incoming.length) {
-    await bulkUpsertCustomers(incoming)
-  }
-
-  await setMeta(CUSTOMER_LAST_SYNC_KEY, new Date().toISOString())
-  return incoming.length
+  // ⏸️ DESACTIVADO EN MODO LOCAL
+  return 0
 }
 
+export async function pushCustomersToCloud() {
+  // ⏸️ DESACTIVADO EN MODO LOCAL
+  return 0
+}
+
+/* PUSH CUSTOMERS A SUPABASE - COMENTARIZADA
 export async function pushCustomersToCloud() {
   const dirty = await getDirtyCustomers()
   console.log('🔍 Clientes sucios encontrados:', dirty.length)
@@ -352,7 +373,9 @@ export async function pushCustomersToCloud() {
   if (toUpsert.length) {
     try {
       console.log(`📨 Sincronizando ${toUpsert.length} cliente(s) a Supabase:`, toUpsert)
-      const { data, error } = await remoteCustomerTable().upsert(toUpsert, { onConflict: 'customer_id' })
+      const { data, error } = await supabase
+        .from('customer')
+        .upsert(toUpsert, { onConflict: 'customer_id' })
       if (error) {
         console.error('❌ Error de Supabase:', error)
         throw error
@@ -367,7 +390,14 @@ export async function pushCustomersToCloud() {
   await markCustomersClean(dirty.map((customer) => customer.id))
   return dirty.length
 }
+*/
 
+export async function pushSalesToCloud() {
+  // ⏸️ DESACTIVADO EN MODO LOCAL
+  return 0
+}
+
+/* PUSH SALES A SUPABASE - COMENTARIZADA
 export async function pushSalesToCloud() {
   const dirty = await getDirtySales()
   console.log('🔍 Ventas sucias encontradas:', dirty.length)
@@ -394,7 +424,9 @@ export async function pushSalesToCloud() {
   if (toUpsert.length) {
     try {
       console.log(`📨 Insertando ${toUpsert.length} venta(s) en Supabase...`)
-      const { data, error } = await remoteSaleTable().insert(toUpsert)
+      const { data, error } = await supabase
+        .from('sale')
+        .insert(toUpsert)
       if (error) {
         console.error('❌ Error de Supabase:', error)
         throw error
@@ -409,45 +441,75 @@ export async function pushSalesToCloud() {
   await markSalesClean(dirty.map((sale) => sale.id))
   return dirty.length
 }
+*/
 
 export async function syncAll() {
+  // ⏸️ MODO LOCAL: Todas las sincronizaciones con Supabase están desactivadas
+  // El software funciona completamente en modo offline/local
+  // Los datos se guardan solo en IndexedDB (local)
+  console.log('⏸️ Supabase sync desactivado - Modo LOCAL')
+  return
+}
+
+/* SINCRONIZACIÓN A SUPABASE - COMENTARIZADA
+export async function syncAll() {
+  const now = Date.now()
+  const timeSinceLastSync = now - lastSyncTime
+  
+  if (isSyncing) {
+    console.log('⏳ Sincronización en progreso, ignorando nueva solicitud')
+    return
+  }
+  
+  if (timeSinceLastSync < SYNC_THROTTLE_MS) {
+    console.log(`⏱️ Sync throttled: espera ${Math.round((SYNC_THROTTLE_MS - timeSinceLastSync) / 1000)}s más`)
+    return
+  }
+  
+  isSyncing = true
+  lastSyncTime = now
+  console.log('🔄 Iniciando sincronización con Supabase...')
+  
   try {
     await pushToCloud()
   } catch (error) {
     console.error('sync push error', error)
   }
+  
   try {
     await pushCustomersToCloud()
   } catch (error) {
     console.error('sync customer push error', error)
   }
+  
   try {
     await pushSalesToCloud()
   } catch (error) {
     console.error('sync sales push error', error)
   }
+  
   try {
     await pushBillsToCloud()
   } catch (error) {
     console.error('sync bills push error', error)
   }
+  
   try {
     await pullFromCloud()
   } catch (error) {
     console.error('sync pull error', error)
   }
+  
   try {
     await pullCustomersFromCloud()
   } catch (error) {
     console.error('sync customer pull error', error)
   }
-  // ⚠️ pullBillsFromCloud desactivado temporalmente - tabla bill tiene estructura/RLS diferente
-  // try {
-  //   await pullBillsFromCloud()
-  // } catch (error) {
-  //   console.error('sync bills pull error', error)
-  // }
+  
+  console.log('✅ Ciclo de sincronización completado')
+  isSyncing = false
 }
+*/
 
 export async function purgeLegacyItems() {
   const all = await db.items.toArray()

@@ -1,7 +1,7 @@
 import { supabase } from './supabaseClient'
 import { pushSalesToCloud } from './sync'
 
-const SUPABASE_SCHEMA = 'trendo'
+const SUPABASE_SCHEMA = 'public'
 const SALE_TABLE = 'sale'
 const SALE_REMOTE_TABLE = `${SUPABASE_SCHEMA}.${SALE_TABLE}`
 

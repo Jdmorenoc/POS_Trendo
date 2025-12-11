@@ -3,7 +3,7 @@ import { supabase } from './supabaseClient'
 
 export const db = new Dexie('trendo_pos')
 
-const SUPABASE_SCHEMA = 'trendo'
+const SUPABASE_SCHEMA = 'public'
 const CUSTOMER_TABLE = 'customer'
 
 // Version 1: items + meta
@@ -131,6 +131,40 @@ db.version(11).stores({
   bills: 'id, sale_consecutive, buy_consecutive, product_id, customer_document, created_at, dirty, deleted'
 })
 
+// Version 12: extend shifts table with audit fields (vouchersTotal, transfersVerified, notes, expectedCash, difference)
+db.version(12).stores({
+  items: 'id, item, gender, updated_at, dirty, deleted, xs, s, m, l, xl',
+  meta: 'key',
+  returns: 'id, itemId, purchased_at, created_at, dirty, deleted',
+  sales: 'id, created_at, updated_at, method, total, items, shiftId, customerId, tipoComprobante, dirty, deleted',
+  shifts: 'id, opened_at, closed_at, userEmail, initialCash, finalCash, active, vouchersTotal, transfersVerified, expectedCash, difference',
+  customers: 'id, identificationNumber, identificationType, type, email, dirty, deleted',
+  bills: 'id, sale_consecutive, buy_consecutive, product_id, customer_document, created_at, dirty, deleted'
+}).upgrade(tx => {
+  return tx.table('shifts').toCollection().modify(shift => {
+    if (typeof shift.vouchersTotal === 'undefined') shift.vouchersTotal = 0
+    if (typeof shift.transfersVerified === 'undefined') shift.transfersVerified = 0
+    if (typeof shift.notes === 'undefined') shift.notes = ''
+    if (typeof shift.expectedCash === 'undefined') shift.expectedCash = 0
+    if (typeof shift.difference === 'undefined') shift.difference = 0
+  })
+})
+
+// Version 13: add shiftId index to returns table for arqueo queries
+db.version(13).stores({
+  items: 'id, item, gender, updated_at, dirty, deleted, xs, s, m, l, xl',
+  meta: 'key',
+  returns: 'id, itemId, shiftId, purchased_at, created_at, dirty, deleted',
+  sales: 'id, created_at, updated_at, method, total, items, shiftId, customerId, tipoComprobante, dirty, deleted',
+  shifts: 'id, opened_at, closed_at, userEmail, initialCash, finalCash, active, vouchersTotal, transfersVerified, expectedCash, difference',
+  customers: 'id, identificationNumber, identificationType, type, email, dirty, deleted',
+  bills: 'id, sale_consecutive, buy_consecutive, product_id, customer_document, created_at, dirty, deleted'
+}).upgrade(tx => {
+  return tx.table('returns').toCollection().modify(ret => {
+    if (typeof ret.shiftId === 'undefined') ret.shiftId = null
+  })
+})
+
 export async function getMeta(key, defaultValue = null) {
   const value = await db.table('meta').get(key)
   return value?.value ?? defaultValue
@@ -213,7 +247,16 @@ export async function adjustStockByItem(itemCode, size, delta) {
 // Lookup by human-readable ITEM code
 export async function findItemByCode(code) {
   if (!code) return null
-  return db.table('items').where('item').equals(code).first()
+  const normalized = String(code).trim().toLowerCase()
+  if (!normalized) return null
+  return db
+    .table('items')
+    .filter(item => {
+      if (!item || item.deleted === 1) return false
+      const current = String(item.item || '').trim().toLowerCase()
+      return current === normalized
+    })
+    .first()
 }
 
 // Returns API
@@ -221,7 +264,7 @@ export async function listReturns() {
   return db.table('returns').where('deleted').equals(0).reverse().sortBy('created_at')
 }
 
-export async function addReturn({ itemId, reason, amount, purchased_at }) {
+export async function addReturn({ itemId, reason, amount, purchased_at, shiftId, product_name, size, quantity, refund_amount }) {
   // Validate 30 day window
   try {
     const purchasedDate = new Date(purchased_at)
@@ -234,7 +277,22 @@ export async function addReturn({ itemId, reason, amount, purchased_at }) {
 
   const id = (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2))
   const created_at = new Date().toISOString()
-  const record = { id, itemId, reason, amount: parseFloat(amount) || 0, purchased_at, created_at, dirty: 1, deleted: 0 }
+  const record = { 
+    id, 
+    itemId, 
+    reason, 
+    amount: parseFloat(amount) || parseFloat(refund_amount) || 0, 
+    purchased_at, 
+    created_at, 
+    dirty: 1, 
+    deleted: 0,
+    // Campos adicionales para almacenar detalles completos
+    shiftId: shiftId || null,
+    product_name: product_name || '',
+    size: size || '',
+    quantity: quantity || 1,
+    refund_amount: parseFloat(refund_amount) || parseFloat(amount) || 0
+  }
   await db.table('returns').put(record)
   return record
 }
@@ -323,13 +381,25 @@ export async function openShift({ userEmail, initialCash }) {
   return record
 }
 
-export async function closeShift({ finalCash }) {
+export async function closeShift({
+  finalCash,
+  vouchersTotal = 0,
+  transfersVerified = 0,
+  notes = '',
+  expectedCash = 0,
+  difference = 0
+}) {
   const active = await getActiveShift()
   if (!active) throw new Error('No hay turno activo')
   const closed_at = new Date().toISOString()
   active.closed_at = closed_at
   active.finalCash = parseFloat(finalCash) || 0
   active.active = 0
+  active.vouchersTotal = parseFloat(vouchersTotal) || 0
+  active.transfersVerified = parseFloat(transfersVerified) || 0
+  active.notes = notes
+  active.expectedCash = parseFloat(expectedCash) || 0
+  active.difference = parseFloat(difference) || 0
   await db.table('shifts').put(active)
   return active
 }
@@ -408,23 +478,14 @@ function mapCustomerToCloud(customer) {
 // Customers API
 export async function upsertCustomer(c) {
   const now = new Date().toISOString()
-  const remote = customerRemoteTable()
-  
-  if (!remote) {
-    throw new Error('Supabase no está disponible para clientes')
-  }
 
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    throw new Error('Sin conexión a internet para guardar el cliente')
-  }
-
-  // El customer_id es el número de identificación (PK en Supabase)
+  // El customer_id es el número de identificación (PK lógico en modo local)
   const customerId = c.customer_id || c.identificationNumber || c.id
   if (!customerId) {
     throw new Error('El número de identificación es requerido')
   }
 
-  // Construir payload SOLO con los campos que existen en Supabase (sin timestamps)
+  // Build payload similar to Supabase schema to reuse normalizers
   const payload = {
     customer_id: String(customerId).trim(),
     customer_type: c.customer_type || c.type || 'Persona',
@@ -434,72 +495,59 @@ export async function upsertCustomer(c) {
     last_name: c.last_name || c.apellidos || null,
     second_last_name: c.second_last_name || null,
     email: c.email || null,
+    address: c.address || null,
     phone_indicative: c.phone_indicative || c.phoneIndicative || '+57',
-    phone_number: c.phone_number || c.phoneNumber || null
+    phone_number: c.phone_number || c.phoneNumber || null,
+    created_at: c.created_at || now,
+    updated_at: now
   }
 
-  console.log('📤 Guardando cliente en Supabase:', payload)
+  console.log('💾 [MODO LOCAL] Guardando cliente en IndexedDB:', payload)
 
-  const response = await remote.upsert(payload, { onConflict: 'customer_id' }).select()
-  
-  if (response?.error) {
-    console.error('❌ Error guardando cliente:', response.error)
-    throw response.error
+  const normalized = mapCustomerFromCloud(payload) || {
+    id: payload.customer_id,
+    customer_id: payload.customer_id,
+    identificationNumber: payload.customer_id,
+    identificationType: payload.identification_type,
+    identification_type: payload.identification_type,
+    type: payload.customer_type,
+    customer_type: payload.customer_type,
+    first_name: payload.first_name || '',
+    second_name: payload.second_name || '',
+    last_name: payload.last_name || '',
+    second_last_name: payload.second_last_name || '',
+    nombres: payload.first_name || '',
+    apellidos: payload.last_name || '',
+    email: payload.email || '',
+    address: payload.address || '',
+    phone_indicative: payload.phone_indicative || '+57',
+    phone_number: payload.phone_number || '',
+    phoneIndicative: payload.phone_indicative || '+57',
+    phoneNumber: payload.phone_number || ''
   }
 
-  const supabaseRecord = Array.isArray(response?.data) ? response.data[0] : response?.data
-  console.log('✅ Cliente guardado:', supabaseRecord)
-  
-  const normalized = mapCustomerFromCloud(supabaseRecord || payload)
-  
-  // Guardar en IndexedDB local
   const localRecord = {
     ...normalized,
+    created_at: payload.created_at,
+    updated_at: payload.updated_at,
     dirty: 0,
     synced: true
   }
+
   await db.table('customers').put(localRecord)
-  
-  return normalized
+
+  return localRecord
 }
 
 export async function findCustomerByIdentification(identificationNumber) {
   if (!identificationNumber) return null
   const normalized = String(identificationNumber).trim()
-  
-  // Buscar primero en local (IndexedDB)
+
+  // Buscar únicamente en local (modo offline)
   const local = await db.table('customers').where('identificationNumber').equals(normalized).first()
   if (local) return local
 
-  const online = typeof navigator !== 'undefined' ? navigator.onLine : false
-  const remote = customerRemoteTable()
-  if (!online || !remote) return null
-
-  try {
-    console.log('🔍 Buscando cliente en Supabase por customer_id:', normalized)
-    
-    // En Supabase, customer_id ES el número de identificación (PK)
-    const { data, error } = await remote
-      .select('*')
-      .eq('customer_id', normalized)
-      .limit(1)
-      .maybeSingle()
-
-    if (error) throw error
-    if (!data) {
-      console.log('ℹ️ Cliente no encontrado en Supabase')
-      return null
-    }
-    
-    console.log('✅ Cliente encontrado:', data)
-    const normalizedRecord = mapCustomerFromCloud(data)
-    if (normalizedRecord) {
-      await db.table('customers').put(normalizedRecord)
-      return normalizedRecord
-    }
-  } catch (error) {
-    console.error('Error fetching customer from Supabase', error)
-  }
+  console.log('ℹ️ Cliente no encontrado en IndexedDB (modo local)')
   return null
 }
 
@@ -574,6 +622,8 @@ export async function addBill(billData) {
     buy_consecutive: billData.buy_consecutive || null,
     product_id: billData.product_id || null,
     customer_document: billData.customer_document !== undefined ? billData.customer_document : '', // Preservar cadena vacía, NO convertir a null
+    product_name: billData.product_name || null,
+    size: billData.size || null,
     created_at: now,
     updated_at: now,
     dirty: 1,

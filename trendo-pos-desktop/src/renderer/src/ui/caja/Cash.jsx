@@ -112,12 +112,27 @@ export default function Cash({ onBack, onLogout, onNavigate }) {
       if ((item[l.size] || 0) < l.qty) return showToast(`Sin stock para ${l.code} (${l.size})`, 'error')
     }
 
+    // Construir objeto de cliente completo
+    const customerData = {
+      customer_id: customerId,
+      customer_type: clientType,
+      identification_type: identType,
+      first_name: firstName,
+      second_name: secondName,
+      last_name: lastName,
+      second_last_name: secondLastName,
+      email: email,
+      phone_indicative: phoneIndicative,
+      phone_number: phoneNumber
+    }
+
     const pending = {
       cart,
       total,
       items,
       customerId,
-      invoiceType
+      invoiceType,
+      customer: customerData // Pasar datos completos del cliente
     }
     await setMeta('pending_sale', pending)
     if (typeof onNavigate === 'function') onNavigate('payment')

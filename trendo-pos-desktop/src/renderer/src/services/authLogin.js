@@ -2,11 +2,17 @@ import { supabase } from './supabaseClient'
 
 // --- CONSTANTES ---
 const STORAGE_KEY = 'mock_credentials'
+const RECOVERY_TOKENS_KEY = 'recovery_tokens'
 const DEFAULT_ROLE = 'Cajero'
 const VALID_ROLES = ['Administrador', 'Cajero']
+const USE_LOCAL_ONLY = import.meta.env.VITE_USE_LOCAL_ONLY === 'true'
+const FORCE_LOCAL_MODE = true  // 🔓 FORZAR MODO LOCAL SIEMPRE
+const RECOVERY_TOKEN_EXPIRY = 30 * 60 * 1000 // 30 minutos
 
 // --- AYUDANTES ---
 function hasSupabaseAuth() {
+  // 🔓 Forzar modo local siempre
+  if (FORCE_LOCAL_MODE || USE_LOCAL_ONLY) return false
   return Boolean(supabase && supabase.auth && typeof supabase.auth.signInWithPassword === 'function')
 }
 
@@ -25,19 +31,87 @@ function getStore() {
 }
 
 function setStore(store) {
-  if (typeof window === 'undefined') return
-  try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store)) } catch {}
+  if (typeof window === 'undefined') {
+    throw new Error('localStorage no disponible (server-side)')
+  }
+  try { 
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store))
+  } catch (err) {
+    console.error('❌ Error guardando en localStorage:', err)
+    throw new Error('No se pudo guardar en localStorage: ' + err.message)
+  }
 }
 
 function persistMockSession(user) {
+  if (typeof window === 'undefined') {
+    throw new Error('localStorage no disponible (server-side)')
+  }
+  try { 
+    window.localStorage.setItem('mock_user', JSON.stringify(user)) 
+  } catch (err) {
+    console.error('❌ Error guardando sesión:', err)
+    throw new Error('No se pudo guardar sesión: ' + err.message)
+  }
+}
+
+// --- FUNCIONES PARA RECUPERACIÓN DE CONTRASEÑA (LOCAL) ---
+function generateRecoveryToken() {
+  // Generar un token aleatorio de 32 caracteres
+  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
+}
+
+function getRecoveryTokens() {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = window.localStorage.getItem(RECOVERY_TOKENS_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch { return {} }
+}
+
+function setRecoveryTokens(tokens) {
   if (typeof window === 'undefined') return
-  try { window.localStorage.setItem('mock_user', JSON.stringify(user)) } catch {}
+  try { window.localStorage.setItem(RECOVERY_TOKENS_KEY, JSON.stringify(tokens)) } catch {}
+}
+
+function createRecoveryToken(email) {
+  const tokens = getRecoveryTokens()
+  const token = generateRecoveryToken()
+  const expiresAt = Date.now() + RECOVERY_TOKEN_EXPIRY
+  
+  tokens[email] = { token, expiresAt }
+  setRecoveryTokens(tokens)
+  
+  return token
+}
+
+function validateRecoveryToken(email, token) {
+  const tokens = getRecoveryTokens()
+  const record = tokens[email]
+  
+  if (!record) return { valid: false, message: 'No hay solicitud de recuperación activa' }
+  if (record.token !== token) return { valid: false, message: 'Token inválido' }
+  if (Date.now() > record.expiresAt) {
+    delete tokens[email]
+    setRecoveryTokens(tokens)
+    return { valid: false, message: 'Token expirado (30 minutos)' }
+  }
+  
+  return { valid: true }
+}
+
+function clearRecoveryToken(email) {
+  const tokens = getRecoveryTokens()
+  delete tokens[email]
+  setRecoveryTokens(tokens)
 }
 
 // ==========================================
 // 1. FUNCIÓN DE INICIO DE SESIÓN (LOGIN)
 // ==========================================
 export async function loginWithEmail(email, password) {
+  // Liberar el hilo para que React pueda renderizar
+  await Promise.resolve()
+  
   const trimmedEmail = String(email || '').trim().toLowerCase()
   const safePassword = String(password || '')
 
@@ -61,7 +135,7 @@ export async function loginWithEmail(email, password) {
       throw error
     }
 
-    // B. Recuperar datos del empleado desde el esquema 'trendo'
+    // B. Recuperar datos del empleado desde el esquema 'public'
     const rawUser = data?.user
     let typeEmployee = normalizeTypeEmployee(rawUser?.user_metadata?.type_employee)
     let employeeData = null
@@ -69,7 +143,7 @@ export async function loginWithEmail(email, password) {
     try {
         // Consultamos la tabla real en tu esquema personalizado
         const { data: dbDataArray, error: dbError } = await supabase
-            .schema('trendo') // <--- IMPORTANTE: Esquema trendo
+            .schema('public') // <--- IMPORTANTE: Esquema public
             .from('employee')
             .select('type_employee, first_name, last_name, second_name, second_last_name')
             .eq('auth_user_id', rawUser.id)
@@ -101,6 +175,9 @@ export async function loginWithEmail(email, password) {
   }
 
   // --- MODO OFFLINE (FALLBACK LOCAL) ---
+  // Liberar hilo nuevamente antes de operaciones de localStorage
+  await Promise.resolve()
+  
   const store = getStore()
   const entry = store[trimmedEmail]
   if (!entry) throw new Error('Usuario no encontrado (Modo Offline)')
@@ -120,6 +197,9 @@ export async function loginWithEmail(email, password) {
 // 2. FUNCIÓN DE REGISTRO (CORREGIDA Y ROBUSTA)
 // ==========================================
 export async function registerWithEmail(email, password, roleInput, names, extraData) {
+  // Liberar el hilo para que React pueda renderizar
+  await Promise.resolve()
+  
   const trimmedEmail = String(email || '').trim().toLowerCase()
   const safePassword = String(password || '')
   const typeEmployee = normalizeTypeEmployee(roleInput)
@@ -139,8 +219,8 @@ export async function registerWithEmail(email, password, roleInput, names, extra
   const docValue = extraData?.document || names?.document || names?.em_document
   const phoneValue = extraData?.phone || names?.phone
 
-  // Validamos que venga la cédula (obligatorio en BD)
-  if (!docValue) throw new Error('La Cédula/Documento es obligatoria')
+  // En modo local, el documento no es obligatorio para permitir registro de prueba
+  // if (!docValue) throw new Error('La Cédula/Documento es obligatoria')
 
   // --- MODO ONLINE (SUPABASE) ---
   if (hasSupabaseAuth()) {
@@ -163,8 +243,8 @@ export async function registerWithEmail(email, password, roleInput, names, extra
           second_last_name: person.secondLastName,
           
           // --- NUEVOS DATOS PARA EL TRIGGER SQL ---
-          em_document: docValue, 
-          phone: phoneValue
+          em_document: docValue || '', 
+          phone: phoneValue || ''
         }
       }
     })
@@ -180,62 +260,150 @@ export async function registerWithEmail(email, password, roleInput, names, extra
     return { 
         success: true, 
         requiresLogin: true, 
+        isLocal: false,
         message: "Registro exitoso. Revisa tu correo para confirmar la cuenta antes de ingresar." 
     }
   }
 
   // --- MODO OFFLINE (FALLBACK LOCAL) ---
-  const store = getStore()
-  if (store[trimmedEmail]) throw new Error('El usuario ya existe (Local)')
+  // Liberar hilo nuevamente antes de operaciones de localStorage
+  await Promise.resolve()
   
-  store[trimmedEmail] = {
-    password: safePassword,
-    type_employee: typeEmployee,
-    ...person,
-    em_document: docValue,
-    phone: phoneValue
+  try {
+    const store = getStore()
+    if (store[trimmedEmail]) throw new Error('El usuario ya existe')
+    
+    console.log('💾 Guardando credenciales locales para:', trimmedEmail)
+    store[trimmedEmail] = {
+      password: safePassword,
+      type_employee: typeEmployee,
+      first_name: person.firstName,
+      second_name: person.secondName,
+      last_name: person.lastName,
+      second_last_name: person.secondLastName,
+      em_document: docValue || '',
+      phone: phoneValue || ''
+    }
+    
+    console.log('💾 Llamando a setStore()...')
+    setStore(store)
+    console.log('✅ Credenciales guardadas en localStorage')
+    
+    // Liberar hilo antes de persistir sesión
+    await Promise.resolve()
+    
+    const user = { 
+      email: trimmedEmail, 
+      type_employee: typeEmployee, 
+      first_name: person.firstName,
+      second_name: person.secondName,
+      last_name: person.lastName,
+      second_last_name: person.secondLastName
+    }
+    
+    console.log('💾 Persistiendo sesión...')
+    persistMockSession(user)
+    console.log('✅ Sesión persistida')
+    
+    return { 
+      success: true, 
+      requiresLogin: false, 
+      isLocal: true,
+      message: "Registro exitoso en modo local. Puedes iniciar sesión ahora.",
+      user: user
+    }
+  } catch (err) {
+    console.error('❌ Error en registro offline:', err)
+    throw new Error(err?.message || 'Error al guardar nuevo usuario')
   }
-  setStore(store)
-  
-  const user = { email: trimmedEmail, type_employee: typeEmployee, ...person }
-  persistMockSession(user)
-  return user
 }
 
 export { VALID_ROLES }
 
 // ==========================================
-// 3. RECUPERACIÓN DE CONTRASEÑA
+// 3. ENVIAR RECUPERACIÓN DE CONTRASEÑA
 // ==========================================
 export async function sendPasswordRecovery(email) {
+  // Liberar el hilo para que React pueda renderizar
+  await Promise.resolve()
+  
   const trimmedEmail = String(email || '').trim().toLowerCase()
   if (!trimmedEmail) throw new Error('Correo electrónico requerido')
 
-  if (hasSupabaseAuth()) {
-    // Preferir la API moderna si está disponible
-    try {
-      const redirectTo = typeof window !== 'undefined' ? window.location.origin : undefined
-      if (typeof supabase.auth.resetPasswordForEmail === 'function') {
-        const { data, error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, { redirectTo })
-        if (error) throw error
-        return { success: true, message: 'Correo de recuperación enviado. Revisa tu bandeja.' }
-      }
+  // 🔓 SIEMPRE usar modo local (FORCE_LOCAL_MODE está activo)
+  console.log('🔐 Recuperación de contraseña en modo LOCAL')
+  
+  // Liberar hilo antes de acceder a localStorage
+  await Promise.resolve()
+  
+  // Modo offline: generar token local para recuperación
+  const store = getStore()
+  if (!store[trimmedEmail]) {
+    throw new Error('Usuario no encontrado en el sistema local')
+  }
+  
+  const token = createRecoveryToken(trimmedEmail)
+  
+  console.log('✅ Token de recuperación generado:', token)
+  
+  return { 
+    success: true, 
+    message: `✅ Token generado: ${token}\n\n📋 Copia este token, ingresa tu correo y nueva contraseña en la siguiente pantalla.\n\n⏰ El token expira en 30 minutos.`,
+    isLocal: true,
+    token: token,
+    email: trimmedEmail
+  }
+}
 
-      // Fallback para versiones antiguas del cliente
-      if (supabase.auth.api && typeof supabase.auth.api.resetPasswordForEmail === 'function') {
-        const { data, error } = await supabase.auth.api.resetPasswordForEmail(trimmedEmail)
-        if (error) throw error
-        return { success: true, message: 'Correo de recuperación enviado. Revisa tu bandeja.' }
-      }
+// ==========================================
+// 4. CAMBIAR CONTRASEÑA CON TOKEN
+// ==========================================
+export async function resetPasswordWithToken(email, token, newPassword) {
+  // Liberar el hilo para que React pueda renderizar
+  await Promise.resolve()
+  
+  const trimmedEmail = String(email || '').trim().toLowerCase()
+  const safePassword = String(newPassword || '')
 
-      throw new Error('Funcionalidad de recuperación no disponible en este cliente de Supabase')
-    } catch (err) {
-      throw err
-    }
+  if (!trimmedEmail || !safePassword || !token) {
+    throw new Error('Datos incompletos: correo, token y contraseña requeridos')
   }
 
-  // Modo offline: simulamos envío si el usuario existe localmente
+  if (safePassword.length < 6) {
+    throw new Error('La contraseña debe tener al menos 6 caracteres')
+  }
+
+  // 🔓 SIEMPRE usar modo local (FORCE_LOCAL_MODE está activo)
+  console.log('🔐 Cambio de contraseña en modo LOCAL')
+  console.log('📧 Email:', trimmedEmail)
+  console.log('🔑 Token:', token)
+  
+  // Liberar hilo antes de acceder a localStorage
+  await Promise.resolve()
+  
+  // Modo offline: validar token y cambiar contraseña local
+  const validation = validateRecoveryToken(trimmedEmail, token)
+  if (!validation.valid) {
+    console.error('❌ Token inválido o expirado:', validation.message)
+    throw new Error(validation.message)
+  }
+
   const store = getStore()
-  if (!store[trimmedEmail]) throw new Error('Usuario no encontrado (Modo Offline)')
-  return { success: true, message: 'Correo de recuperación simulado (Modo Offline)' }
+  if (!store[trimmedEmail]) {
+    throw new Error('Usuario no encontrado en el sistema local')
+  }
+
+  console.log('🔑 Actualizando contraseña para:', trimmedEmail)
+  store[trimmedEmail].password = safePassword
+  setStore(store)
+  
+  clearRecoveryToken(trimmedEmail)
+  
+  console.log('✅ Contraseña actualizada exitosamente')
+
+  return { 
+    success: true, 
+    message: '✅ Contraseña actualizada exitosamente. Ahora puedes iniciar sesión con tu nueva contraseña.',
+    isLocal: true
+  }
 }

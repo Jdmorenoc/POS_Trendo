@@ -1,7 +1,7 @@
 import { supabase } from './supabaseClient'
 
 const EMPLOYEE_TABLE = 'employee'
-const EMPLOYEE_SCHEMA = 'trendo'
+const EMPLOYEE_SCHEMA = 'public'
 const EMPLOYEE_LAST_SYNC_KEY = 'lastEmployeeSync'
 
 /**

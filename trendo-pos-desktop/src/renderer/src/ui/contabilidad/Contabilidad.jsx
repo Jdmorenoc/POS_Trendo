@@ -355,7 +355,8 @@ export default function Contabilidad({ onBack }) {
                     </Pie>
                     <Tooltip 
                       formatter={(value) => formatCOP(value)}
-                      contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px', color: '#fff' }}
+                      contentStyle={{ backgroundColor: '#fff', border: '2px solid #3b82f6', borderRadius: '8px', color: '#000', fontSize: '12px', padding: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}
+                      labelStyle={{ color: '#1f2937', fontSize: '12px', fontWeight: 'bold' }}
                     />
                   </PieChart>
                 </ResponsiveContainer>
@@ -373,9 +374,10 @@ export default function Contabilidad({ onBack }) {
                     <YAxis stroke="#9ca3af" />
                     <Tooltip 
                       formatter={(value) => formatCOP(value)}
-                      contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px', color: '#fff' }}
+                      contentStyle={{ backgroundColor: '#fff', border: '2px solid #3b82f6', borderRadius: '8px', color: '#000', fontSize: '12px', padding: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}
+                      labelStyle={{ color: '#1f2937', fontSize: '12px', fontWeight: 'bold' }}
                     />
-                    <Legend wrapperStyle={{ color: '#9ca3af' }} />
+                    <Legend wrapperStyle={{ color: '#9ca3af', fontSize: '12px' }} />
                     <Bar dataKey="ventas" fill="#3b82f6" name="Ventas (COP)" radius={[8, 8, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -393,9 +395,10 @@ export default function Contabilidad({ onBack }) {
                     <YAxis stroke="#9ca3af" />
                     <Tooltip 
                       formatter={(value) => formatCOP(value)}
-                      contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px', color: '#fff' }}
+                      contentStyle={{ backgroundColor: '#fff', border: '2px solid #10b981', borderRadius: '8px', color: '#000', fontSize: '12px', padding: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}
+                      labelStyle={{ color: '#1f2937', fontSize: '12px', fontWeight: 'bold' }}
                     />
-                    <Legend wrapperStyle={{ color: '#9ca3af' }} />
+                    <Legend wrapperStyle={{ color: '#9ca3af', fontSize: '12px' }} />
                     <Line 
                       type="monotone" 
                       dataKey="total" 
@@ -494,20 +497,70 @@ export default function Contabilidad({ onBack }) {
 
         {selectedShiftAgg && (
           <div className="mt-6 p-4 rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-800">
-            <h5 className="text-sm font-semibold mb-2 text-black dark:text-white">Detalle turno seleccionado</h5>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-              <div><div className="text-gray-500 dark:text-gray-400">Apertura</div><div className="font-mono">{new Date(selectedShiftAgg.shift.opened_at).toLocaleTimeString()}</div></div>
-              <div><div className="text-gray-500 dark:text-gray-400">Inicial</div><div>{formatCOP(selectedShiftAgg.shift.initialCash||0)}</div></div>
-              <div><div className="text-gray-500 dark:text-gray-400">Cierre</div><div className="font-mono">{selectedShiftAgg.shift.closed_at ? new Date(selectedShiftAgg.shift.closed_at).toLocaleTimeString() : '—'}</div></div>
-              <div><div className="text-gray-500 dark:text-gray-400">Final</div><div>{selectedShiftAgg.shift.closed_at ? formatCOP(selectedShiftAgg.shift.finalCash||0) : '—'}</div></div>
-              <div><div className="text-gray-500 dark:text-gray-400">Prendas</div><div>{selectedShiftAgg.items}</div></div>
-              <div><div className="text-gray-500 dark:text-gray-400">Total</div><div>{formatCOP(selectedShiftAgg.total)}</div></div>
-              <div><div className="text-gray-500 dark:text-gray-400">Efectivo</div><div>{formatCOP(selectedShiftAgg.efectivo)}</div></div>
-              <div><div className="text-gray-500 dark:text-gray-400">Transferencia</div><div>{formatCOP(selectedShiftAgg.transferencia)}</div></div>
-              <div><div className="text-gray-500 dark:text-gray-400">Tarjeta</div><div>{formatCOP(selectedShiftAgg.tarjeta)}</div></div>
-              <div><div className="text-gray-500 dark:text-gray-400">Dif. Caja</div><div>{selectedShiftAgg.shift.closed_at ? formatCOP((selectedShiftAgg.shift.finalCash||0)-(selectedShiftAgg.shift.initialCash||0)) : '—'}</div></div>
+            <h5 className="text-sm font-semibold mb-4 text-black dark:text-white">Detalle turno seleccionado</h5>
+            
+            {/* Sección 1: Tiempos */}
+            <div className="mb-4 pb-4 border-b border-gray-200 dark:border-neutral-700">
+              <h6 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2 uppercase">Horarios</h6>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div><div className="text-gray-500 dark:text-gray-400">Apertura</div><div className="font-mono">{new Date(selectedShiftAgg.shift.opened_at).toLocaleTimeString()}</div></div>
+                <div><div className="text-gray-500 dark:text-gray-400">Cierre</div><div className="font-mono">{selectedShiftAgg.shift.closed_at ? new Date(selectedShiftAgg.shift.closed_at).toLocaleTimeString() : '—'}</div></div>
+              </div>
             </div>
-            <div className="mt-3 text-right">
+
+            {/* Sección 2: Efectivo */}
+            <div className="mb-4 pb-4 border-b border-gray-200 dark:border-neutral-700">
+              <h6 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2 uppercase">Arqueo de Caja</h6>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded border border-blue-200 dark:border-blue-800">
+                  <div className="text-gray-500 dark:text-gray-400">Inicial</div>
+                  <div className="font-semibold">{formatCOP(selectedShiftAgg.shift.initialCash||0)}</div>
+                </div>
+                <div className={`p-2 rounded border ${selectedShiftAgg.shift.closed_at ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-gray-50 dark:bg-neutral-700 border-gray-200 dark:border-neutral-700'}`}>
+                  <div className="text-gray-500 dark:text-gray-400">Conteo Final</div>
+                  <div className="font-semibold">{selectedShiftAgg.shift.closed_at ? formatCOP(selectedShiftAgg.shift.finalCash||0) : '—'}</div>
+                </div>
+                <div className="bg-purple-50 dark:bg-purple-900/20 p-2 rounded border border-purple-200 dark:border-purple-800">
+                  <div className="text-gray-500 dark:text-gray-400">Esperado</div>
+                  <div className="font-semibold">{formatCOP(selectedShiftAgg.shift.expectedCash||0)}</div>
+                </div>
+                <div className={`p-2 rounded border ${Math.abs(selectedShiftAgg.shift.difference || 0) < 100 ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800'}`}>
+                  <div className="text-gray-500 dark:text-gray-400">Diferencia</div>
+                  <div className={`font-semibold ${selectedShiftAgg.shift.difference > 0 ? 'text-green-600 dark:text-green-400' : selectedShiftAgg.shift.difference < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'}`}>
+                    {formatCOP(selectedShiftAgg.shift.difference||0)}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Sección 3: Ventas */}
+            <div className="mb-4 pb-4 border-b border-gray-200 dark:border-neutral-700">
+              <h6 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2 uppercase">Ventas del Turno</h6>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                <div className="bg-gray-50 dark:bg-neutral-700 p-2 rounded border border-gray-200 dark:border-neutral-600">
+                  <div className="text-gray-500 dark:text-gray-400">Prendas</div>
+                  <div className="font-semibold">{selectedShiftAgg.items}</div>
+                </div>
+                <div className="bg-gray-50 dark:bg-neutral-700 p-2 rounded border border-gray-200 dark:border-neutral-600">
+                  <div className="text-gray-500 dark:text-gray-400">Total</div>
+                  <div className="font-semibold">{formatCOP(selectedShiftAgg.total)}</div>
+                </div>
+                <div className="bg-green-50 dark:bg-green-900/20 p-2 rounded border border-green-200 dark:border-green-800">
+                  <div className="text-gray-500 dark:text-gray-400">Efectivo</div>
+                  <div className="font-semibold text-green-700 dark:text-green-400">{formatCOP(selectedShiftAgg.efectivo)}</div>
+                </div>
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded border border-blue-200 dark:border-blue-800">
+                  <div className="text-gray-500 dark:text-gray-400">Transferencia</div>
+                  <div className="font-semibold text-blue-700 dark:text-blue-400">{formatCOP(selectedShiftAgg.transferencia)}</div>
+                </div>
+                <div className="bg-purple-50 dark:bg-purple-900/20 p-2 rounded border border-purple-200 dark:border-purple-800">
+                  <div className="text-gray-500 dark:text-gray-400">Tarjeta</div>
+                  <div className="font-semibold text-purple-700 dark:text-purple-400">{formatCOP(selectedShiftAgg.tarjeta)}</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="text-right">
               <button onClick={()=>setSelectedShiftId(null)} className="text-xs px-3 py-1 rounded border border-gray-300 dark:border-neutral-600 hover:bg-gray-50 dark:hover:bg-neutral-700">Cerrar detalle</button>
             </div>
 

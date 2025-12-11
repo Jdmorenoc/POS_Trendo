@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient'
 
-const SCHEMA = 'trendo'
+const SCHEMA = 'public'
 const TABLE = 'bill'
 
 const trim = (value) => {
@@ -11,7 +11,7 @@ const trim = (value) => {
 
 /**
  * Mapea los datos del formulario local a las columnas de Supabase
- * Columnas en Supabase (esquema trendo, tabla bill):
+ * Columnas en Supabase (esquema public, tabla bill):
  * - id (PK) - UUID
  * - line_item - Número de línea en la factura
  * - quantity - Cantidad de productos

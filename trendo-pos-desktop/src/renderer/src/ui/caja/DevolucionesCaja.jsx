@@ -1,10 +1,12 @@
 /* eslint-disable no-undef */
-import { useEffect, useState, useMemo } from 'react'
-import { listReturns, addReturn, listItems, findItemByCode, getActiveShift, setMeta, getSalesByCustomerId, getBillsBySaleId } from '@/services/db'
+import { useEffect, useState, useMemo, useRef } from 'react'
+import { listReturns, addReturn, listItems, findItemByCode, getActiveShift, setMeta, getSalesByCustomerId, getBillsBySaleId, findCustomerByIdentification } from '@/services/db'
 import { formatCOP } from '@/lib/currency'
 import { liveQuery } from 'dexie'
 import SidebarCaja from './Layout/Sidebar'
 import { useScanner } from '@/lib/useScanner'
+
+const SIZE_OPTIONS = ['xs', 's', 'm', 'l', 'xl']
 
 function useLiveQuery(fn, deps = []) {
   const [data, setData] = useState([])
@@ -69,6 +71,9 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
     phone_number: ''
   })
 
+  // Referencia para debounce en búsqueda de cliente por cédula
+  const customerIdentBlurTimeoutRef = useRef(null)
+
   // Verificar turno activo al montar
   useEffect(() => {
     async function checkShift() {
@@ -83,6 +88,15 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
       }
     }
     checkShift()
+  }, [])
+
+  // Limpiar timeout de debounce al desmontar
+  useEffect(() => {
+    return () => {
+      if (customerIdentBlurTimeoutRef.current) {
+        window.clearTimeout(customerIdentBlurTimeoutRef.current)
+      }
+    }
   }, [])
 
   useScanner({ onScan: code => { 
@@ -107,6 +121,43 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
     if (!item) showToast('Producto no encontrado', 'error')
   }
 
+  // Función para autocompletar cliente cuando se ingresa la cédula
+  async function handleCustomerIdentificationBlur() {
+    const identNumber = customerForm.customer_id.trim()
+    if (!identNumber) return
+
+    if (customerIdentBlurTimeoutRef.current) {
+      window.clearTimeout(customerIdentBlurTimeoutRef.current)
+    }
+
+    customerIdentBlurTimeoutRef.current = window.setTimeout(async () => {
+      try {
+        const existing = await findCustomerByIdentification(identNumber)
+        if (existing && existing.customer_id) {
+          // Cliente encontrado - autocompletar los datos
+          setCustomerForm({
+            customer_id: existing.customer_id || '',
+            customer_type: existing.customer_type || existing.type || 'Persona',
+            identification_type: existing.identification_type || existing.identificationType || 'CC',
+            first_name: existing.first_name || existing.nombres || '',
+            second_name: existing.second_name || '',
+            last_name: existing.last_name || existing.apellidos || '',
+            second_last_name: existing.second_last_name || '',
+            email: existing.email || '',
+            phone_indicative: existing.phone_indicative || existing.phoneIndicative || '+57',
+            phone_number: existing.phone_number || existing.phoneNumber || ''
+          })
+          showToast('Cliente cargado correctamente', 'success')
+        } else {
+          showToast('Cliente no encontrado en el sistema', 'info')
+        }
+      } catch (error) {
+        console.error('Error buscando cliente:', error)
+        showToast('Error al buscar cliente', 'error')
+      }
+    }, 300)
+  }
+
   function addDevolution() {
     if (!foundItem) return showToast('Selecciona un producto', 'error')
     if (!devForm.purchasedAt) return showToast('Fecha de compra requerida', 'error')
@@ -122,7 +173,9 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
       itemPrice: foundItem.price || 0,
       purchasedAt: devForm.purchasedAt,
       reason: devForm.reason,
-      refundAmount: refundAmt
+      refundAmount: refundAmt,
+      size: '',
+      quantity: 1
     }])
 
     setFoundItem(null)
@@ -150,7 +203,11 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
           reason: dev.reason,
           amount: dev.refundAmount,
           purchased_at: dev.purchasedAt,
-          shiftId: activeShift.id
+          shiftId: activeShift.id,
+          product_name: dev.itemName || dev.itemCode,
+          size: dev.size || '',
+          quantity: dev.quantity || 1,
+          refund_amount: dev.refundAmount
         })
       }
 
@@ -195,6 +252,7 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
         if (bills && Array.isArray(bills)) {
           bills.forEach((bill, billIdx) => {
             const qty = bill.quantity || 1
+            console.log(`📦 Bill #${billIdx}: product_id=${bill.product_id}, size="${bill.size}", product_name="${bill.product_name}"`)
             for (let i = 0; i < qty; i++) {
               groupedByDate[date].push({
                 ...sale,
@@ -234,7 +292,6 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
 
   async function confirmDevolution() {
     if (!selectedItem) return showToast('Selecciona un item', 'error')
-    if (!selectedItemSize) return showToast('Selecciona una talla', 'error')
 
     try {
       // Obtener el item seleccionado del estado actual
@@ -247,6 +304,11 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
       }
 
       const expandedItem = item.expandedItem
+      const recordedSize = (expandedItem.size || '').toString().trim()
+      const normalizedRecordedSize = recordedSize.toLowerCase()
+      const resolvedSize = selectedItemSize || normalizedRecordedSize
+
+      if (!resolvedSize) return showToast('Selecciona una talla', 'error')
 
       const newItem = {
         id: `dev_${Date.now()}`,
@@ -257,7 +319,8 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
         purchasedAt: item.created_at ? new Date(item.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         reason: 'Cliente solicitó devolución',
         refundAmount: expandedItem.price || 0,
-        size: selectedItemSize
+        size: resolvedSize,
+        quantity: 1
       }
 
       setDevolutionList([...devolutionList, newItem])
@@ -435,7 +498,7 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
   return (
     <div className="h-full flex bg-white dark:bg-neutral-900 dark:text-gray-100">
       <SidebarCaja onNavigate={onNavigate} currentView="devoluciones" />
-      <main className="flex-1 p-8 bg-white dark:bg-neutral-900 dark:text-gray-100 min-h-screen">
+      <main className="flex-1 p-8 pb-24 bg-white dark:bg-neutral-900 dark:text-gray-100 min-h-screen overflow-y-auto">
         {shiftLoading ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
@@ -487,7 +550,7 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
               </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-6 items-start">
               {/* Panel Izquierdo: Búsqueda de productos */}
               <div className="bg-white dark:bg-neutral-800 rounded-lg border border-gray-200 dark:border-neutral-700 p-4">
                 <h3 className="font-medium mb-3 text-black dark:text-white">Agregar Productos</h3>
@@ -514,7 +577,7 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
                     <div>
                       <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Seleccionar Talla</label>
                       <div className="grid grid-cols-5 gap-0.5 text-[10px]">
-                        {['xs', 's', 'm', 'l', 'xl'].map(sz => (
+                        {SIZE_OPTIONS.map(sz => (
                           <button
                             key={sz}
                             onClick={() => setNewSelectSize(sz)}
@@ -682,14 +745,18 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
                       {/* Items dentro de la Orden */}
                       {selectedOrder === orderIdx && (
                         <div className="bg-gray-50 dark:bg-neutral-700/30 p-3 space-y-2 border-t border-gray-300 dark:border-neutral-600">
-                          {order.items.map((item, itemIdx) => (
-                            <div key={`item_${orderIdx}_${itemIdx}`} className="p-2 bg-white dark:bg-neutral-700 rounded border border-gray-200 dark:border-neutral-600">
+                          {order.items.map((item, itemIdx) => {
+                            const recordedSize = (item.expandedItem?.size || '').toString().trim()
+                            const normalizedDisplaySize = recordedSize ? recordedSize.toUpperCase() : 'SIN TALLA'
+                            return (
+                              <div key={`item_${orderIdx}_${itemIdx}`} className="p-2 bg-white dark:bg-neutral-700 rounded border border-gray-200 dark:border-neutral-600">
                               {selectedItem === `${orderIdx}_${itemIdx}` ? (
                                 <div className="space-y-2">
                                   <div>
                                     <div className="text-xs text-gray-500 dark:text-gray-400">ID: <span className="font-semibold text-black dark:text-white">{item.expandedItem?.product_id || 'SIN ID'}</span></div>
                                     <div className="text-sm font-semibold text-black dark:text-white mt-1">{item.expandedItem?.product_name || 'Producto'}</div>
                                     <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">Precio: <span className="font-semibold text-black dark:text-white">{formatCOP(item.expandedItem?.price || 0)}</span></div>
+                                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Talla registrada: <span className="font-semibold text-black dark:text-white">{normalizedDisplaySize}</span></div>
                                     {item.expandedItem?.totalQty > 1 && (
                                       <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Unidad {item.expandedItem?.unitNumber} de {item.expandedItem?.totalQty}</div>
                                     )}
@@ -699,7 +766,7 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
                                   <div>
                                     <label className="block text-xs font-medium mb-2 text-gray-600 dark:text-gray-300">Seleccionar Talla *</label>
                                     <div className="grid grid-cols-5 gap-0.5">
-                                      {['xs', 's', 'm', 'l', 'xl'].map(size => (
+                                      {SIZE_OPTIONS.map(size => (
                                         <button
                                           key={size}
                                           onClick={() => setSelectedItemSize(size)}
@@ -713,6 +780,11 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
                                         </button>
                                       ))}
                                     </div>
+                                    {recordedSize && !SIZE_OPTIONS.includes(recordedSize.toLowerCase()) && (
+                                      <div className="mt-2 text-[11px] text-amber-600 dark:text-amber-300">
+                                        Talla registrada: <span className="font-semibold">{normalizedDisplaySize}</span> (se usará automáticamente)
+                                      </div>
+                                    )}
                                   </div>
 
                                   {/* Botones de Acción */}
@@ -733,19 +805,25 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
                                 </div>
                               ) : (
                                 <button
-                                  onClick={() => { setSelectedItem(`${orderIdx}_${itemIdx}`); setSelectedItemSize('') }}
+                                  onClick={() => {
+                                    const normalizedSizeKey = recordedSize.toLowerCase()
+                                    setSelectedItem(`${orderIdx}_${itemIdx}`)
+                                    setSelectedItemSize(normalizedSizeKey && SIZE_OPTIONS.includes(normalizedSizeKey) ? normalizedSizeKey : '')
+                                  }}
                                   className="w-full text-left p-1 hover:bg-gray-100 dark:hover:bg-neutral-600 rounded transition-colors"
                                 >
                                   <div className="text-xs text-gray-500 dark:text-gray-400">ID: <span className="font-semibold text-black dark:text-white">{item.expandedItem?.product_id || 'SIN ID'}</span></div>
                                   <div className="text-sm font-semibold text-black dark:text-white">{item.expandedItem?.product_name || 'Producto'}</div>
                                   <div className="text-xs text-gray-600 dark:text-gray-400">Precio: {formatCOP(item.expandedItem?.price || 0)}</div>
+                                  <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">Talla: <span className="font-semibold text-black dark:text-white">{normalizedDisplaySize}</span></div>
                                   {item.expandedItem?.totalQty > 1 && (
                                     <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Unidad {item.expandedItem?.unitNumber} de {item.expandedItem?.totalQty}</div>
                                   )}
                                 </button>
                               )}
-                            </div>
-                          ))}
+                              </div>
+                            )
+                          })}
                         </div>
                       )}
                     </div>
@@ -754,7 +832,7 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
               )}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-6 relative">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-6 relative items-start">
               {/* Panel Izquierdo: Búsqueda y Artículos */}
               <div className="bg-white dark:bg-neutral-800 rounded-lg border border-gray-200 dark:border-neutral-700 p-4 lg:col-span-1">
                 <h3 className="font-medium mb-3 text-black dark:text-white">Búsqueda de Artículos</h3>
@@ -850,6 +928,7 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
                         <div className="flex justify-between items-start">
                           <div>
                             <div className="font-medium text-blue-900 dark:text-blue-300">{dev.itemName}</div>
+                            <div className="text-blue-700 dark:text-blue-400 mt-1 uppercase">Talla: <span className="font-semibold">{String(dev.size || 'Sin talla').toUpperCase()}</span></div>
                             <div className="text-blue-700 dark:text-blue-400 mt-1">
                               Reembolso: <span className="font-semibold">{formatCOP(dev.refundAmount)}</span>
                             </div>
@@ -943,6 +1022,7 @@ export default function DevolucionesCaja({ onBack, onLogout, onNavigate }) {
                       type="text"
                       value={customerForm.customer_id}
                       onChange={e => setCustomerForm({...customerForm, customer_id: e.target.value})}
+                      onBlur={handleCustomerIdentificationBlur}
                       placeholder="Identificación"
                       autoFocus
                       className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-xs text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"

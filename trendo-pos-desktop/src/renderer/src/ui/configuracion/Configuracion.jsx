@@ -11,7 +11,6 @@ export default function Configuracion({ onBack }) {
   const [highContrast, setHighContrast] = useState(() => typeof window !== 'undefined' && window.localStorage.getItem('pref_contrast') === '1')
   const [fontScale, setFontScale] = useState(() => typeof window !== 'undefined' ? parseFloat(window.localStorage.getItem('pref_font_scale') || '1') : 1)
   const [darkMode, setDarkMode] = useState(() => typeof window !== 'undefined' && window.localStorage.getItem('pref_dark') === '1')
-  const [compactMode, setCompactMode] = useState(() => typeof window !== 'undefined' && window.localStorage.getItem('pref_compact') === '1')
   const [sessionTimeout, setSessionTimeout] = useState(() => typeof window !== 'undefined' ? parseInt(window.localStorage.getItem('pref_session_timeout') || '30') : 30)
   const [autoLogoutEnabled, setAutoLogoutEnabled] = useState(() => typeof window !== 'undefined' && window.localStorage.getItem('pref_auto_logout') !== '0')
   const audioRef = useRef(null)
@@ -243,11 +242,6 @@ export default function Configuracion({ onBack }) {
     window.localStorage.setItem('pref_font_scale', String(fontScale))
   }, [fontScale])
 
-  // Guardar modo compacto
-  useEffect(() => {
-    window.localStorage.setItem('pref_compact', compactMode ? '1' : '0')
-  }, [compactMode])
-
   // Guardar timeout de sesión
   useEffect(() => {
     window.localStorage.setItem('pref_session_timeout', String(sessionTimeout))
@@ -289,17 +283,6 @@ export default function Configuracion({ onBack }) {
                   className={`px-3 py-1 rounded text-xs font-medium transition-all ${highContrast ? 'bg-blue-600 text-white' : 'bg-gray-300 text-gray-700'}`}
                 >
                   {highContrast ? 'ON' : 'OFF'}
-                </button>
-              </div>
-
-              {/* Modo compacto */}
-              <div className="flex items-center justify-between p-3 border border-gray-300 dark:border-neutral-700 rounded-lg bg-gray-50 dark:bg-neutral-700/30">
-                <span className="text-sm font-medium">Modo compacto</span>
-                <button
-                  onClick={() => setCompactMode(c => !c)}
-                  className={`px-3 py-1 rounded text-xs font-medium transition-all ${compactMode ? 'bg-blue-600 text-white' : 'bg-gray-300 text-gray-700'}`}
-                >
-                  {compactMode ? 'ON' : 'OFF'}
                 </button>
               </div>
             </div>

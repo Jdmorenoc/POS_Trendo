@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient'
 
-const SCHEMA = 'trendo'
+const SCHEMA = 'public'
 const TABLE = 'customer'
 
 const trim = (value) => {

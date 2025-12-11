@@ -13,8 +13,16 @@ export default function Payment({ onBack, onNavigate, onLogout }) {
   // Métodos de pago (multi-entrada)
   const [efectivo, setEfectivo] = useState('')
   const [transferencia, setTransferencia] = useState('')
-  const [tarjetaDebito, setTarjetaDebito] = useState('')
-  const [tarjetaCredito, setTarjetaCredito] = useState('')
+  
+  // Pago con Tarjeta
+  const [tarjetaTipo, setTarjetaTipo] = useState('credito') // 'credito' o 'debito'
+  const [tarjetaVoucher, setTarjetaVoucher] = useState('')
+  const [tarjetaValor, setTarjetaValor] = useState('')
+  
+  // Otros Pagos
+  const [otroPagoTipo, setOtroPagoTipo] = useState('addi') // 'addi' o 'sistecredito'
+  const [otroPagoValor, setOtroPagoValor] = useState('')
+  
   const [descuentoPct, setDescuentoPct] = useState('') // porcentaje 0-100
   const [customerDocument, setCustomerDocument] = useState('') // Documento del cliente
   const [generating, setGenerating] = useState(false)
@@ -77,11 +85,12 @@ export default function Payment({ onBack, onNavigate, onLogout }) {
   const baseNeta = useMemo(() => totalAPagar / 1.19, [totalAPagar])
   const ivaAmount = useMemo(() => totalAPagar - baseNeta, [totalAPagar, baseNeta])
   
+  
   const pagoEfectivo = useMemo(() => parseCOP(efectivo||'') || 0, [efectivo])
   const pagoTransferencia = useMemo(() => parseCOP(transferencia||'') || 0, [transferencia])
-  const pagoDebito = useMemo(() => parseCOP(tarjetaDebito||'') || 0, [tarjetaDebito])
-  const pagoCredito = useMemo(() => parseCOP(tarjetaCredito||'') || 0, [tarjetaCredito])
-  const sumaPagos = useMemo(() => pagoEfectivo + pagoTransferencia + pagoDebito + pagoCredito, [pagoEfectivo, pagoTransferencia, pagoDebito, pagoCredito])
+  const pagoTarjeta = useMemo(() => parseCOP(tarjetaValor||'') || 0, [tarjetaValor])
+  const pagoOtro = useMemo(() => parseCOP(otroPagoValor||'') || 0, [otroPagoValor])
+  const sumaPagos = useMemo(() => pagoEfectivo + pagoTransferencia + pagoTarjeta + pagoOtro, [pagoEfectivo, pagoTransferencia, pagoTarjeta, pagoOtro])
   const restante = useMemo(() => Math.max(0, totalAPagar - sumaPagos), [totalAPagar, sumaPagos])
   const cambio = useMemo(() => sumaPagos > totalAPagar ? (sumaPagos - totalAPagar) : 0, [sumaPagos, totalAPagar])
 
@@ -89,7 +98,8 @@ export default function Payment({ onBack, onNavigate, onLogout }) {
     const activos = [
       pagoEfectivo>0 && 'Efectivo',
       pagoTransferencia>0 && 'Transferencia',
-      (pagoDebito>0 || pagoCredito>0) && 'Tarjeta'
+      pagoTarjeta>0 && 'Tarjeta',
+      pagoOtro>0 && 'Otro'
     ].filter(Boolean)
     if (activos.length === 1) return activos[0]
     if (activos.length === 0) return 'Sin pago'
@@ -220,20 +230,22 @@ export default function Payment({ onBack, onNavigate, onLogout }) {
         const itemsAgrupados = {}
         for (const item of pending.cart) {
           const code = item.code
-          if (!itemsAgrupados[code]) {
-            itemsAgrupados[code] = {
+          const sizeKey = (item.size || '').toString().trim().toLowerCase()
+          const groupKey = `${code}::${sizeKey}`
+          if (!itemsAgrupados[groupKey]) {
+            itemsAgrupados[groupKey] = {
               ...item,
               qty: 0
             }
           }
-          itemsAgrupados[code].qty += parseInt(item.qty) || 1
+          itemsAgrupados[groupKey].qty += parseInt(item.qty) || 1
         }
         
-        console.log(`✓ Items agrupados: ${Object.keys(itemsAgrupados).length} productos únicos`)
+        console.log(`✓ Items agrupados: ${Object.keys(itemsAgrupados).length} combinación(es) producto+talla`)
         
         // Crear una factura única con todos los items agrupados
-        for (const code of Object.keys(itemsAgrupados)) {
-          const item = itemsAgrupados[code]
+        for (const groupKey of Object.keys(itemsAgrupados)) {
+          const item = itemsAgrupados[groupKey]
           try {
             // Usar docCliente que ya fue validado
             if (!docCliente || docCliente.length === 0) {
@@ -246,14 +258,16 @@ export default function Payment({ onBack, onNavigate, onLogout }) {
               type_transaction: metodoPrincipal() || 'efectivo',
               sale_consecutive: saleRecord.id, // UUID de la venta
               product_id: item.code || null,
-              customer_document: docCliente
+              customer_document: docCliente,
+              size: item.size ? String(item.size).trim().toLowerCase() : null,
+              product_name: item.name || item.title || null
             }
-            console.log(`  📍 Agregando: ${code} x${item.qty} unidades, cliente: ${docCliente}`)
+            console.log(`  📍 Agregando: ${item.code} talla ${item.size || 'N/A'} x${item.qty} unidades, cliente: ${docCliente}`)
             
             await addBill(billDetail)
             console.log(`  ✓ Guardado en bill`)
           } catch (billError) {
-            console.error(`  ✗ Error guardando ${code}:`, billError.message)
+            console.error(`  ✗ Error guardando ${item.code}:`, billError.message)
           }
         }
         console.log(`✓ Factura creada con ${Object.keys(itemsAgrupados).length} línea(s) de detalle`)
@@ -296,8 +310,53 @@ export default function Payment({ onBack, onNavigate, onLogout }) {
       
       setGenerating(false)
       
-      // Navegar a caja limpia
-      if (typeof onNavigate === 'function') onNavigate('cash')
+      // Navegar a pantalla de progreso de facturación
+      const saleData = {
+        sale_id: saleRecord?.id,
+        consecutive: saleRecord?.id,
+        created_at: saleRecord?.created_at,
+        customer_document: docCliente,
+        customer_name: (() => {
+          // Intentar obtener el nombre completo desde múltiples estructuras posibles
+          if (pending?.customer) {
+            const c = pending.customer
+            // Opción 1: Campos separados first_name/last_name (de DevolucionesCaja)
+            if (c.first_name || c.second_name || c.last_name) {
+              const parts = [c.first_name, c.second_name, c.last_name].filter(Boolean)
+              if (parts.length > 0) return parts.join(' ').trim()
+            }
+            // Opción 2: Campo directo name
+            if (c.name) return c.name
+            // Opción 3: Campos nombres/apellidos
+            if (c.nombres || c.apellidos) {
+              const parts = [c.nombres, c.apellidos].filter(Boolean)
+              if (parts.length > 0) return parts.join(' ').trim()
+            }
+          }
+          // Valor por defecto si no hay nombre
+          return 'Consumidor Final'
+        })(),
+        customer_email: pending?.customer?.email || '',
+        customer_phone: pending?.customer?.phone_number || pending?.customer?.phoneNumber || '',
+        customer_address: pending?.customer?.address || '',
+        customer_city: pending?.customer?.city || '',
+        items: pending.cart || [],
+        subtotal: subtotal,
+        discount: descuentoVal,
+        credit: creditAmount,
+        base: baseNeta,
+        iva: ivaAmount,
+        total: totalAPagar,
+        payment_method: metodoPrincipal(),
+        employee_document: employeeDoc
+      }
+      
+      if (typeof onNavigate === 'function') {
+        onNavigate('invoice-progress', {
+          saleData,
+          invoiceType: pending.invoiceType || 'Factura POS'
+        })
+      }
     } catch (e) {
       console.error('Error al generar factura:', e)
       setError(e.message || 'Error al generar factura')
@@ -328,24 +387,99 @@ export default function Payment({ onBack, onNavigate, onLogout }) {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Métodos de pago */}
           <div className="lg:col-span-2 space-y-4">
+            {/* INGRESAR PAGOS - Efectivo y Transferencia */}
             <div className="bg-white dark:bg-neutral-800 rounded-lg border border-gray-200 dark:border-neutral-700 p-4">
-              <h3 className="font-medium mb-3 text-black dark:text-white">Ingresar pagos</h3>
+              <h3 className="font-medium mb-3 text-black dark:text-white">Ingresar Pagos</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Efectivo</label>
-                  <input type="text" value={efectivo} onChange={e=>setEfectivo(formatCOPInput(e.target.value))} inputMode="numeric" className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0" />
+                  <input 
+                    type="text" 
+                    value={efectivo} 
+                    onChange={e=>setEfectivo(formatCOPInput(e.target.value))} 
+                    inputMode="numeric" 
+                    className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    placeholder="0" 
+                  />
                 </div>
                 <div>
                   <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Transferencia</label>
-                  <input type="text" value={transferencia} onChange={e=>setTransferencia(formatCOPInput(e.target.value))} inputMode="numeric" className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0" />
+                  <input 
+                    type="text" 
+                    value={transferencia} 
+                    onChange={e=>setTransferencia(formatCOPInput(e.target.value))} 
+                    inputMode="numeric" 
+                    className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    placeholder="0" 
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* PAGO CON TARJETA */}
+            <div className="bg-white dark:bg-neutral-800 rounded-lg border border-gray-200 dark:border-neutral-700 p-4">
+              <h3 className="font-medium mb-3 text-black dark:text-white">Pago con Tarjeta</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Tipo</label>
+                  <select 
+                    value={tarjetaTipo} 
+                    onChange={e=>setTarjetaTipo(e.target.value)}
+                    className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="credito">Crédito</option>
+                    <option value="debito">Débito</option>
+                  </select>
                 </div>
                 <div>
-                  <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Tarjeta Débito</label>
-                  <input type="text" value={tarjetaDebito} onChange={e=>setTarjetaDebito(formatCOPInput(e.target.value))} inputMode="numeric" className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0" />
+                  <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Nro Voucher</label>
+                  <input 
+                    type="text" 
+                    value={tarjetaVoucher} 
+                    onChange={e=>setTarjetaVoucher(e.target.value)} 
+                    className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    placeholder="Ej: 123456" 
+                  />
                 </div>
                 <div>
-                  <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Tarjeta Crédito</label>
-                  <input type="text" value={tarjetaCredito} onChange={e=>setTarjetaCredito(formatCOPInput(e.target.value))} inputMode="numeric" className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0" />
+                  <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Valor</label>
+                  <input 
+                    type="text" 
+                    value={tarjetaValor} 
+                    onChange={e=>setTarjetaValor(formatCOPInput(e.target.value))} 
+                    inputMode="numeric" 
+                    className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    placeholder="0" 
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* OTROS PAGOS */}
+            <div className="bg-white dark:bg-neutral-800 rounded-lg border border-gray-200 dark:border-neutral-700 p-4">
+              <h3 className="font-medium mb-3 text-black dark:text-white">Otros Pagos</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Tipo</label>
+                  <select 
+                    value={otroPagoTipo} 
+                    onChange={e=>setOtroPagoTipo(e.target.value)}
+                    className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="addi">Addi</option>
+                    <option value="sistecredito">SisteCredito</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs mb-1 text-gray-600 dark:text-gray-400">Valor a Pagar</label>
+                  <input 
+                    type="text" 
+                    value={otroPagoValor} 
+                    onChange={e=>setOtroPagoValor(formatCOPInput(e.target.value))} 
+                    inputMode="numeric" 
+                    className="w-full px-3 py-2 rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    placeholder="0" 
+                  />
                 </div>
               </div>
             </div>
