@@ -29,10 +29,12 @@ export default function ControlStock({ onBack, onLogout, onNavigate }) {
     for (const it of items) {
       const qty = it.quantity || 0
       stockTotal += qty
-      if (qty === 0) sin += 1
-      else {
+      if (qty === 0) {
+        sin += 1
+      } else if (qty <= STOCK_MIN_DEFAULT) {
+        bajos += 1
+      } else {
         disponibles += 1
-        if (qty <= 2) bajos += 1
       }
     }
     return { stockTotal, disponibles, bajos, sin }

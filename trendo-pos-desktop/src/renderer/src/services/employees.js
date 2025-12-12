@@ -307,10 +307,28 @@ export async function syncProfileChangesToEmployee(profileUpdates) {
     const updates = {}
 
     // Actualizar nombre si cambió
-    if (profileUpdates.displayName && profileUpdates.displayName !== employee.first_name) {
-      // Para simplificar, usar displayName como first_name
-      // Si necesitas separar en first_name y last_name, ajusta aquí
-      updates.first_name = profileUpdates.displayName
+    if (profileUpdates.first_name && profileUpdates.first_name !== employee.first_name) {
+      updates.first_name = profileUpdates.first_name
+    }
+
+    // Actualizar segundo nombre si cambió
+    if (profileUpdates.second_name !== undefined && profileUpdates.second_name !== employee.second_name) {
+      updates.second_name = profileUpdates.second_name
+    }
+
+    // Actualizar apellido si cambió
+    if (profileUpdates.last_name && profileUpdates.last_name !== employee.last_name) {
+      updates.last_name = profileUpdates.last_name
+    }
+
+    // Actualizar segundo apellido si cambió
+    if (profileUpdates.second_last_name !== undefined && profileUpdates.second_last_name !== employee.second_last_name) {
+      updates.second_last_name = profileUpdates.second_last_name
+    }
+
+    // Actualizar teléfono si cambió
+    if (profileUpdates.phone && profileUpdates.phone !== employee.phone) {
+      updates.phone = profileUpdates.phone
     }
 
     // Actualizar email si cambió

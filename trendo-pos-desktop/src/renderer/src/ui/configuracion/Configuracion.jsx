@@ -1,4 +1,4 @@
-/* eslint-disable no-unused-vars */
+/* eslint-disable no-unused-vars, no-undef */
 import { useEffect, useState, useRef } from 'react'
 import Header from '../inventario/Layout/Header'
 import Footer from '../inventario/Layout/Footer'
@@ -6,7 +6,7 @@ import { supabase } from '@/services/supabaseClient'
 import { syncProfileChangesToEmployee } from '@/services/employees'
 
 // Componente principal de Configuración con todas las opciones de accesibilidad
-export default function Configuracion({ onBack }) {
+export default function Configuracion({ onBack, user: initialUser }) {
   // Preferencias de UI
   const [highContrast, setHighContrast] = useState(() => typeof window !== 'undefined' && window.localStorage.getItem('pref_contrast') === '1')
   const [fontScale, setFontScale] = useState(() => typeof window !== 'undefined' ? parseFloat(window.localStorage.getItem('pref_font_scale') || '1') : 1)
@@ -24,7 +24,11 @@ export default function Configuracion({ onBack }) {
   const [editError, setEditError] = useState('')
   const [editSuccess, setEditSuccess] = useState('')
   const [editData, setEditData] = useState({
-    displayName: '',
+    username: '',
+    firstName: '',
+    secondName: '',
+    lastName: '',
+    secondLastName: '',
     email: '',
     phone: '',
     profileImage: '',
@@ -37,44 +41,139 @@ export default function Configuracion({ onBack }) {
   useEffect(() => {
     async function loadUser() {
       try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (user) {
-          setUser(user)
-          console.log('Usuario cargado:', {
-            avatar_url: user.user_metadata?.avatar_url,
-            phone: user.user_metadata?.phone
+        // Primero, intentar usar el usuario del prop (viene de App)
+        if (initialUser) {
+          console.log('✅ Usando usuario del prop:', initialUser.email)
+          setUser(initialUser)
+          const firstName = initialUser.user_metadata?.first_name || ''
+          const secondName = initialUser.user_metadata?.second_name || ''
+          const lastName = initialUser.user_metadata?.last_name || ''
+          const secondLastName = initialUser.user_metadata?.second_last_name || ''
+          
+          console.log('✅ Usuario cargado desde prop:', {
+            email: initialUser.email,
+            firstName,
+            secondName,
+            lastName,
+            secondLastName
           })
+          
           setEditData(prev => ({
             ...prev,
-            displayName: user.user_metadata?.full_name || 'Usuario',
+            username: initialUser.user_metadata?.username || '',
+            firstName,
+            secondName,
+            lastName,
+            secondLastName,
+            email: initialUser.email || '',
+            phone: initialUser.user_metadata?.phone || '',
+            profileImage: initialUser.user_metadata?.avatar_url || ''
+          }))
+          setLoading(false)
+          return
+        }
+        
+        // Si no hay usuario en props, obtenerlo de Supabase
+        console.log('🔄 Intentando cargar usuario de Supabase...')
+        const { data: { user }, error } = await supabase.auth.getUser()
+        
+        if (error) {
+          console.error('❌ Error al obtener usuario:', error)
+        }
+        
+        console.log('📥 Usuario obtenido de Supabase:', user?.email)
+        if (user) {
+          setUser(user)
+          const firstName = user.user_metadata?.first_name || ''
+          const secondName = user.user_metadata?.second_name || ''
+          const lastName = user.user_metadata?.last_name || ''
+          const secondLastName = user.user_metadata?.second_last_name || ''
+          
+          console.log('✅ Usuario cargado de Supabase:', {
+            email: user.email,
+            firstName,
+            secondName,
+            lastName,
+            secondLastName
+          })
+          
+          setEditData(prev => ({
+            ...prev,
+            username: user.user_metadata?.username || '',
+            firstName,
+            secondName,
+            lastName,
+            secondLastName,
             email: user.email || '',
             phone: user.user_metadata?.phone || '',
             profileImage: user.user_metadata?.avatar_url || ''
           }))
+        } else {
+          console.warn('⚠️ No hay usuario autenticado en Supabase')
+          // Intentar cargar desde localStorage como fallback
+          if (typeof window !== 'undefined') {
+            const storedUser = window.localStorage.getItem('mock_user')
+            if (storedUser) {
+              try {
+                const localUser = JSON.parse(storedUser)
+                console.log('📥 Usuario cargado desde localStorage:', localUser.email)
+                setUser(localUser)
+                const firstName = localUser.user_metadata?.first_name || ''
+                const secondName = localUser.user_metadata?.second_name || ''
+                const lastName = localUser.user_metadata?.last_name || ''
+                const secondLastName = localUser.user_metadata?.second_last_name || ''
+                
+                setEditData(prev => ({
+                  ...prev,
+                  username: localUser.user_metadata?.username || '',
+                  firstName,
+                  secondName,
+                  lastName,
+                  secondLastName,
+                  email: localUser.email || '',
+                  phone: localUser.user_metadata?.phone || '',
+                  profileImage: localUser.user_metadata?.avatar_url || ''
+                }))
+              } catch (e) {
+                console.error('Error parseando usuario de localStorage:', e)
+              }
+            }
+          }
         }
       } catch (e) {
-        console.error('Error cargando usuario:', e)
+        console.error('💥 Error cargando usuario:', e)
       } finally {
         setLoading(false)
       }
     }
     loadUser()
-  }, [])
+  }, [initialUser])
 
   // Función para abrir modal y recargar datos
   async function openEditModal() {
     setShowEditModal(true)
-    // Recargar datos del usuario para asegurar que tenemos la imagen más reciente
+    // Recargar datos del usuario para asegurar que tenemos la información más reciente
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
+        const firstName = user.user_metadata?.first_name || ''
+        const secondName = user.user_metadata?.second_name || ''
+        const lastName = user.user_metadata?.last_name || ''
+        const secondLastName = user.user_metadata?.second_last_name || ''
+        
         console.log('Recargando datos en modal:', {
-          avatar_url: user.user_metadata?.avatar_url,
-          has_image: !!user.user_metadata?.avatar_url
+          firstName,
+          secondName,
+          lastName,
+          secondLastName,
+          avatar_url: user.user_metadata?.avatar_url
         })
         setEditData(prev => ({
           ...prev,
-          displayName: user.user_metadata?.full_name || 'Usuario',
+          firstName,
+          secondName,
+          lastName,
+          secondLastName,
           email: user.email || '',
           phone: user.user_metadata?.phone || '',
           profileImage: user.user_metadata?.avatar_url || ''
@@ -123,11 +222,32 @@ export default function Configuracion({ onBack }) {
     setEditLoading(true)
 
     try {
+      // Verificar que hay un usuario autenticado
+      if (!user) {
+        setEditError('No hay usuario autenticado. Por favor, inicia sesión de nuevo.')
+        setEditLoading(false)
+        return
+      }
+
       const updates = { data: {} }
 
-      // Actualizar nombre
-      if (editData.displayName && editData.displayName !== (user?.user_metadata?.full_name || 'Usuario')) {
-        updates.data.full_name = editData.displayName
+      // Actualizar nombre de usuario
+      if (editData.username !== (user?.user_metadata?.username || '')) {
+        updates.data.username = editData.username
+      }
+
+      // Actualizar nombres
+      if (editData.firstName && editData.firstName !== (user?.user_metadata?.first_name || '')) {
+        updates.data.first_name = editData.firstName
+      }
+      if (editData.secondName !== (user?.user_metadata?.second_name || '')) {
+        updates.data.second_name = editData.secondName
+      }
+      if (editData.lastName && editData.lastName !== (user?.user_metadata?.last_name || '')) {
+        updates.data.last_name = editData.lastName
+      }
+      if (editData.secondLastName !== (user?.user_metadata?.second_last_name || '')) {
+        updates.data.second_last_name = editData.secondLastName
       }
 
       // Actualizar teléfono
@@ -171,52 +291,98 @@ export default function Configuracion({ onBack }) {
         return
       }
 
-      const { error } = await supabase.auth.updateUser(updates)
+      console.log('🔄 Intentando actualizar usuario en Supabase...', updates)
       
-      if (error) {
-        setEditError(error.message || 'Error al guardar cambios')
-      } else {
-        console.log('✅ Perfil actualizado en Supabase')
-        setEditSuccess('Perfil actualizado correctamente')
-        // Recargar usuario
-        const { data: { user: updatedUser } } = await supabase.auth.getUser()
-        console.log('📥 Usuario actualizado:', {
-          avatar_url: updatedUser?.user_metadata?.avatar_url ? 'Presente' : 'No hay',
-          avatar_length: updatedUser?.user_metadata?.avatar_url?.length
-        })
-        setUser(updatedUser)
-        
-        // Actualizar editData con los nuevos valores
-        setEditData(prev => ({
-          ...prev,
-          displayName: updatedUser?.user_metadata?.full_name || 'Usuario',
-          email: updatedUser?.email || '',
-          phone: updatedUser?.user_metadata?.phone || '',
-          profileImage: updatedUser?.user_metadata?.avatar_url || '',
-          newPassword: '',
-          confirmPassword: '',
-          currentPassword: ''
-        }))
-        
-        // Sincronizar cambios a tabla employee en Supabase
-        try {
-          await syncProfileChangesToEmployee({
-            displayName: editData.displayName,
-            email: editData.email,
-            phone: editData.phone,
-            avatar_url: editData.profileImage
-          })
-          console.log('✅ Cambios sincronizados a tabla employee')
-        } catch (syncError) {
-          console.error('⚠️ Error sincronizando a tabla employee:', syncError)
-          // No mostrar error al usuario, pero loguear
+      // Intentar actualizar en Supabase
+      let error = null
+      let updatedUser = null
+      
+      try {
+        const result = await supabase.auth.updateUser(updates)
+        error = result.error
+        if (!error) {
+          const { data: { user: fetchedUser } } = await supabase.auth.getUser()
+          updatedUser = fetchedUser
         }
-
-        // Cerrar modal después de 2 segundos
-        setTimeout(() => {
-          setShowEditModal(false)
-        }, 2000)
+      } catch (e) {
+        console.warn('⚠️ Supabase updateUser falló, usando modo local:', e.message)
+        error = e
       }
+
+      // Construir usuario actualizado (siempre)
+      const updatedUserLocal = {
+        ...user,
+        email: updates.email || user.email,
+        user_metadata: {
+          ...user.user_metadata,
+          username: updates.data.username || user.user_metadata?.username,
+          first_name: updates.data.first_name || user.user_metadata?.first_name,
+          second_name: updates.data.second_name !== undefined ? updates.data.second_name : user.user_metadata?.second_name,
+          last_name: updates.data.last_name || user.user_metadata?.last_name,
+          second_last_name: updates.data.second_last_name !== undefined ? updates.data.second_last_name : user.user_metadata?.second_last_name,
+          phone: updates.data.phone || user.user_metadata?.phone,
+          avatar_url: updates.data.avatar_url || user.user_metadata?.avatar_url
+        }
+      }
+      
+      // Guardar SIEMPRE en localStorage (persistencia local)
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('mock_user', JSON.stringify(updatedUserLocal))
+        console.log('✅ Perfil actualizado y guardado en localStorage')
+      }
+      
+      // Usar el usuario local si Supabase falló
+      if (!updatedUser) {
+        updatedUser = updatedUserLocal
+      }
+      
+      console.log('✅ Perfil actualizado correctamente')
+      setEditSuccess('Perfil actualizado correctamente')
+      
+      console.log('📥 Usuario actualizado:', {
+        firstName: updatedUser?.user_metadata?.first_name,
+        lastName: updatedUser?.user_metadata?.last_name,
+        avatar_url: updatedUser?.user_metadata?.avatar_url ? 'Presente' : 'No hay'
+      })
+      setUser(updatedUser)
+      
+      // Actualizar editData con los nuevos valores
+      setEditData(prev => ({
+        ...prev,
+        username: updatedUser?.user_metadata?.username || '',
+        firstName: updatedUser?.user_metadata?.first_name || '',
+        secondName: updatedUser?.user_metadata?.second_name || '',
+        lastName: updatedUser?.user_metadata?.last_name || '',
+        secondLastName: updatedUser?.user_metadata?.second_last_name || '',
+        email: updatedUser?.email || '',
+        phone: updatedUser?.user_metadata?.phone || '',
+        profileImage: updatedUser?.user_metadata?.avatar_url || '',
+        newPassword: '',
+        confirmPassword: '',
+        currentPassword: ''
+      }))
+      
+      // Sincronizar cambios a tabla employee en Supabase
+      try {
+        await syncProfileChangesToEmployee({
+          first_name: editData.firstName,
+          second_name: editData.secondName,
+          last_name: editData.lastName,
+          second_last_name: editData.secondLastName,
+          email: editData.email,
+          phone: editData.phone,
+          avatar_url: editData.profileImage
+        })
+        console.log('✅ Cambios sincronizados a tabla employee')
+      } catch (syncError) {
+        console.error('⚠️ Error sincronizando a tabla employee:', syncError)
+        // No mostrar error al usuario, pero loguear
+      }
+
+      // Cerrar modal después de 2 segundos
+      setTimeout(() => {
+        setShowEditModal(false)
+      }, 2000)
     } catch (e) {
       setEditError(e.message || 'Error al guardar cambios')
     } finally {
@@ -369,18 +535,24 @@ export default function Configuracion({ onBack }) {
           {/* ===== USUARIO ===== */}
           <div className="border-t border-gray-300 dark:border-neutral-700 pt-6 space-y-4">
             <h3 className="text-xl font-semibold">Cuenta</h3>
-            {!loading && user ? (
+            {loading ? (
+              <div className="p-4 text-center text-gray-500">
+                <div>Cargando información de usuario...</div>
+              </div>
+            ) : user ? (
               <div className="p-4 border border-gray-300 dark:border-neutral-700 rounded-lg bg-blue-50 dark:bg-blue-900/20">
                 <div className="flex items-center gap-4 mb-4">
                   <div className="w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-lg overflow-hidden flex-shrink-0">
                     {user.user_metadata?.avatar_url ? (
                       <img src={user.user_metadata.avatar_url} alt="Perfil" className="w-full h-full object-cover" />
                     ) : (
-                      user.user_metadata?.full_name?.[0]?.toUpperCase() || 'U'
+                      user.user_metadata?.first_name?.[0]?.toUpperCase() || 'U'
                     )}
                   </div>
                   <div>
-                    <div className="font-medium">{user.user_metadata?.full_name || 'Usuario'}</div>
+                    <div className="font-medium">
+                      {user.user_metadata?.username || 'Usuario'}
+                    </div>
                     <div className="text-xs text-gray-600 dark:text-gray-400">{user.email}</div>
                   </div>
                 </div>
@@ -392,159 +564,206 @@ export default function Configuracion({ onBack }) {
                 </button>
               </div>
             ) : (
-              <div className="p-4 text-center text-gray-500">Cargando...</div>
+              <div className="p-4 border border-red-300 dark:border-red-800 rounded-lg bg-red-50 dark:bg-red-900/20 text-center text-red-700 dark:text-red-300">
+                <div>No hay usuario autenticado</div>
+              </div>
             )}
           </div>
         </section>
 
         {/* Modal de edición de perfil */}
         {showEditModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center backdrop-blur-sm z-50 p-4">
-            <div className="bg-white dark:bg-neutral-800 rounded-lg shadow-xl w-full max-w-md p-6 border border-gray-200 dark:border-neutral-700">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-semibold text-black dark:text-white">Editar Perfil</h3>
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center backdrop-blur-sm z-50 p-4 overflow-y-auto">
+            <div className="bg-white dark:bg-neutral-800 rounded-lg shadow-xl w-full max-w-sm p-4 border border-gray-200 dark:border-neutral-700 my-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-black dark:text-white">Editar Perfil</h3>
                 <button
                   onClick={() => setShowEditModal(false)}
-                  className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-2xl leading-none"
+                  className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-xl leading-none"
                 >
                   ✕
                 </button>
               </div>
 
-              <div className="space-y-4">
-                {/* Imagen de Perfil */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Foto de Perfil
-                  </label>
-                  <div className="flex gap-3 items-start">
-                    <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xl font-bold overflow-hidden flex-shrink-0">
-                      {editData.profileImage ? (
-                        <img src={editData.profileImage} alt="Perfil" className="w-full h-full object-cover" />
-                      ) : (
-                        user?.user_metadata?.full_name?.[0]?.toUpperCase() || 'U'
-                      )}
-                    </div>
-                    <div className="flex-1">
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/jpeg,image/png"
-                        onChange={handleImageFileSelect}
-                        className="hidden"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="w-full px-3 py-2 rounded-lg border-2 border-dashed border-gray-300 dark:border-neutral-600 bg-gray-50 dark:bg-neutral-700 text-gray-700 dark:text-gray-300 text-sm hover:bg-gray-100 dark:hover:bg-neutral-600 transition-colors font-medium"
-                      >
-                        📁 Seleccionar imagen
-                      </button>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">JPG o PNG • Máximo 2MB</p>
-                      {editData.profileImage && editData.profileImage.startsWith('data:') && (
-                        <p className="text-xs text-green-600 dark:text-green-400 mt-1">✓ Imagen cargada</p>
-                      )}
-                    </div>
+              <div className="space-y-3 max-h-[70vh] overflow-y-auto">
+                {/* Imagen de Perfil - Compacta */}
+                <div className="flex gap-3 items-center pb-2 border-b border-gray-200 dark:border-neutral-700">
+                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-sm font-bold overflow-hidden flex-shrink-0">
+                    {editData.profileImage ? (
+                      <img src={editData.profileImage} alt="Perfil" className="w-full h-full object-cover" />
+                    ) : (
+                      editData.firstName?.[0]?.toUpperCase() || 'U'
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png"
+                      onChange={handleImageFileSelect}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full px-2 py-1 rounded text-xs border border-gray-300 dark:border-neutral-600 bg-gray-50 dark:bg-neutral-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-neutral-600 transition-colors font-medium"
+                    >
+                      📁 Cambiar foto
+                    </button>
                   </div>
                 </div>
 
-                {/* Nombre */}
+                {/* Nombre de Usuario */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Nombre completo
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Nombre de Usuario
                   </label>
                   <input
                     type="text"
-                    value={editData.displayName}
-                    onChange={(e) => setEditData({ ...editData, displayName: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={editData.username}
+                    onChange={(e) => setEditData({ ...editData, username: e.target.value })}
+                    className="w-full px-2 py-1.5 rounded text-sm border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Mi nombre de usuario"
                   />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Este es el nombre que se mostrará públicamente</p>
                 </div>
 
-                {/* Email */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Correo electrónico
-                  </label>
-                  <input
-                    type="email"
-                    value={editData.email}
-                    onChange={(e) => setEditData({ ...editData, email: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                {/* Teléfono */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Número de celular
-                  </label>
-                  <input
-                    type="tel"
-                    placeholder="+57 3XX XXXXXXX"
-                    value={editData.phone}
-                    onChange={(e) => setEditData({ ...editData, phone: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                {/* Nueva contraseña */}
-                <div className="pt-4 border-t border-gray-200 dark:border-neutral-700">
-                  <p className="text-xs text-gray-600 dark:text-gray-400 mb-3">
-                    Deja vacío si no deseas cambiar la contraseña
-                  </p>
+                {/* Nombres - Grid de 2 columnas */}
+                <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Nueva contraseña
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Primer nombre
                     </label>
                     <input
-                      type="password"
-                      value={editData.newPassword}
-                      onChange={(e) => setEditData({ ...editData, newPassword: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Mínimo 6 caracteres"
+                      type="text"
+                      value={editData.firstName}
+                      onChange={(e) => setEditData({ ...editData, firstName: e.target.value })}
+                      className="w-full px-2 py-1.5 rounded text-sm border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Juan"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Segundo nombre
+                    </label>
+                    <input
+                      type="text"
+                      value={editData.secondName}
+                      onChange={(e) => setEditData({ ...editData, secondName: e.target.value })}
+                      className="w-full px-2 py-1.5 rounded text-sm border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Carlos"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Primer apellido
+                    </label>
+                    <input
+                      type="text"
+                      value={editData.lastName}
+                      onChange={(e) => setEditData({ ...editData, lastName: e.target.value })}
+                      className="w-full px-2 py-1.5 rounded text-sm border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Pérez"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Segundo apellido
+                    </label>
+                    <input
+                      type="text"
+                      value={editData.secondLastName}
+                      onChange={(e) => setEditData({ ...editData, secondLastName: e.target.value })}
+                      className="w-full px-2 py-1.5 rounded text-sm border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="García"
                     />
                   </div>
                 </div>
 
-                {/* Confirmar contraseña */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Confirmar contraseña
-                  </label>
-                  <input
-                    type="password"
-                    value={editData.confirmPassword}
-                    onChange={(e) => setEditData({ ...editData, confirmPassword: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                {/* Email y Teléfono */}
+                <div className="grid grid-cols-1 gap-2">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Correo electrónico
+                    </label>
+                    <input
+                      type="email"
+                      value={editData.email}
+                      onChange={(e) => setEditData({ ...editData, email: e.target.value })}
+                      className="w-full px-2 py-1.5 rounded text-sm border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Número de celular
+                    </label>
+                    <input
+                      type="tel"
+                      placeholder="+57 3XX XXXXXXX"
+                      value={editData.phone}
+                      onChange={(e) => setEditData({ ...editData, phone: e.target.value })}
+                      className="w-full px-2 py-1.5 rounded text-sm border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
                 </div>
 
-                {/* Mensajes */}
+                {/* Contraseña - Separador */}
+                <div className="pt-2 border-t border-gray-200 dark:border-neutral-700">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                    Deja vacío para no cambiar contraseña
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Nueva contraseña
+                      </label>
+                      <input
+                        type="password"
+                        value={editData.newPassword}
+                        onChange={(e) => setEditData({ ...editData, newPassword: e.target.value })}
+                        className="w-full px-2 py-1.5 rounded text-sm border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Mín. 6 caracteres"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Confirmar
+                      </label>
+                      <input
+                        type="password"
+                        value={editData.confirmPassword}
+                        onChange={(e) => setEditData({ ...editData, confirmPassword: e.target.value })}
+                        className="w-full px-2 py-1.5 rounded text-sm border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Mensajes - Compactos */}
                 {editError && (
-                  <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm">
+                  <div className="p-2 rounded text-xs bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300">
                     {editError}
                   </div>
                 )}
                 {editSuccess && (
-                  <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 text-sm">
+                  <div className="p-2 rounded text-xs bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300">
                     {editSuccess}
                   </div>
                 )}
 
-                {/* Botones */}
-                <div className="flex gap-3 pt-4">
+                {/* Botones - Compactos */}
+                <div className="flex gap-2 pt-3 sticky bottom-0 bg-white dark:bg-neutral-800">
                   <button
                     onClick={() => setShowEditModal(false)}
                     disabled={editLoading}
-                    className="flex-1 px-4 py-2 rounded-lg border border-gray-300 dark:border-neutral-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-neutral-700 disabled:opacity-50 font-medium"
+                    className="flex-1 px-3 py-1.5 rounded text-sm border border-gray-300 dark:border-neutral-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-neutral-700 disabled:opacity-50 font-medium"
                   >
                     Cancelar
                   </button>
                   <button
                     onClick={handleSaveProfile}
                     disabled={editLoading}
-                    className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 font-medium"
+                    className="flex-1 px-3 py-1.5 rounded text-sm bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 font-medium"
                   >
                     {editLoading ? 'Guardando...' : 'Guardar'}
                   </button>

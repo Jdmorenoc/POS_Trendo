@@ -238,7 +238,7 @@ export default function App() {
     <>
       {view === 'inventory' && <Inventory user={user} onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />}
       {view === 'controlStock' && <ControlStock onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />}
-      {view === 'configuracion' && <Configuracion onBack={() => setView('menu')} />}
+      {view === 'configuracion' && <Configuracion user={user} onBack={() => setView('menu')} />}
       {view === 'cash' && <Cash onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />}
       {view === 'devoluciones' && <DevolucionesCaja onBack={() => setView('menu')} onLogout={handleLogout} onNavigate={setView} />}
       {view === 'payment' && <Payment onBack={() => setView('cash')} onLogout={handleLogout} onNavigate={(nextView, data) => {
